@@ -24,6 +24,7 @@ type Agent struct {
 	ID             string
 	Hostname       string
 	SpeedPort      int
+	AuthToken      string
 	speedListener  net.Listener
 	conn           *websocket.Conn
 }
@@ -86,6 +87,9 @@ func (a *Agent) Run(ctx context.Context) error {
 
 func (a *Agent) connectAndServe(ctx context.Context) error {
 	wsURL := a.CoordinatorURL + "/ws/agent"
+	if a.AuthToken != "" {
+		wsURL += "?token=" + a.AuthToken
+	}
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial coordinator: %w", err)
@@ -173,20 +177,42 @@ func (a *Agent) handleMeshTest(ctx context.Context, payload interface{}) {
 }
 
 func (a *Agent) handleInternetTest(ctx context.Context) {
-	// Simple internet speed test: download a known file and measure throughput
-	// For now, we'll use a basic HTTP download test
-	tr := protocol.TestResult{
+	result, err := speedtest.RunInternetTest(ctx)
+
+	// Report download result
+	dlResult := protocol.TestResult{
 		SourceID:   a.ID,
 		SourceName: a.Hostname,
 		TestType:   "internet",
 		Direction:  "download",
 		Timestamp:  time.Now(),
-		Error:      "internet test not yet implemented",
 	}
-
+	if err != nil {
+		dlResult.Error = err.Error()
+	} else {
+		dlResult.BitsPerSec = result.DownloadBps
+	}
 	wsjson.Write(ctx, a.conn, protocol.Envelope{
 		Type:    protocol.MsgTestResult,
-		Payload: tr,
+		Payload: dlResult,
+	})
+
+	// Report upload result
+	ulResult := protocol.TestResult{
+		SourceID:   a.ID,
+		SourceName: a.Hostname,
+		TestType:   "internet",
+		Direction:  "upload",
+		Timestamp:  time.Now(),
+	}
+	if err != nil {
+		ulResult.Error = err.Error()
+	} else {
+		ulResult.BitsPerSec = result.UploadBps
+	}
+	wsjson.Write(ctx, a.conn, protocol.Envelope{
+		Type:    protocol.MsgTestResult,
+		Payload: ulResult,
 	})
 }
 

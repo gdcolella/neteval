@@ -19,7 +19,15 @@
         <div class="controls">
             <button id="btn-mesh" class="primary" disabled>Run Mesh Test</button>
             <button id="btn-internet" disabled>Run Internet Test</button>
+            <button id="btn-deploy" class="secondary">Deploy Agents</button>
+            <button id="btn-export-csv">Export CSV</button>
+            <button id="btn-export-json">Export JSON</button>
             <button id="btn-clear">Clear Results</button>
+        </div>
+
+        <div id="progress-bar" class="progress-bar" style="display:none">
+            <div class="progress-text"><span id="progress-text">Testing...</span></div>
+            <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
         </div>
 
         <div class="panels">
@@ -35,12 +43,24 @@
             </div>
 
             <div class="panel">
-                <div class="panel-header">Speed Matrix</div>
+                <div class="panel-header">
+                    <span>Speed Matrix</span>
+                    <div class="tab-bar">
+                        <button class="tab active" data-tab="mesh">Mesh</button>
+                        <button class="tab" data-tab="internet">Internet</button>
+                    </div>
+                </div>
                 <div class="panel-body">
-                    <div id="heatmap-container" class="heatmap-container">
+                    <div id="mesh-container" class="heatmap-container">
                         <div class="empty-state">
                             <h2>No results yet</h2>
                             <p>Connect agents and run a mesh test to see the speed matrix.</p>
+                        </div>
+                    </div>
+                    <div id="internet-container" class="heatmap-container" style="display:none">
+                        <div class="empty-state">
+                            <h2>No internet results yet</h2>
+                            <p>Run an internet test to see each agent's WAN speed.</p>
                         </div>
                     </div>
                 </div>
@@ -54,6 +74,42 @@
             </div>
         </div>
     </div>
+
+    <!-- Deploy Modal -->
+    <div id="deploy-modal" class="modal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Deploy Agents via Active Directory</h2>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="deploy-step-1">
+                    <div class="form-group">
+                        <label>Domain</label>
+                        <input type="text" id="ad-domain" placeholder="corp.example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="ad-username" placeholder="administrator">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="ad-password">
+                    </div>
+                    <button id="btn-discover" class="primary">Discover Machines</button>
+                </div>
+                <div id="deploy-step-2" style="display:none">
+                    <div class="machine-list-header">
+                        <label><input type="checkbox" id="select-all"> Select All</label>
+                        <span id="machine-count">0 machines found</span>
+                    </div>
+                    <div id="machine-list" class="machine-list"></div>
+                    <button id="btn-deploy-selected" class="primary">Deploy to Selected</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
