@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetEval - LAN Speed Diagnostic Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="page">
+        <nav>
+            <div class="nav-inner">
+                <a href="/" class="logo">NetEval</a>
+                <a href="#download" class="nav-link">Download</a>
+            </div>
+        </nav>
+
+        <section class="hero">
+            <h1>Find your network bottleneck<br>in one click.</h1>
+            <p class="subtitle">
+                Run a single executable on one machine. It discovers every computer on
+                your network, deploys itself, and maps the speed between every pair
+                &mdash; no install, no config, no command line.
+            </p>
+            <a href="#download" class="cta">Download NetEval</a>
+        </section>
+
+        <section class="how-it-works">
+            <h2>How it works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <h3>Download &amp; run</h3>
+                    <p>Download the binary for your OS. Double-click it. A dashboard opens in your browser.</p>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <h3>Discover machines</h3>
+                    <p>Enter your Active Directory credentials. NetEval finds every Windows computer on your domain and deploys a lightweight agent to each one.</p>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <h3>Run tests</h3>
+                    <p>Click "Run Mesh Test." NetEval measures upload and download speed between every pair of machines, plus each machine's internet speed.</p>
+                </div>
+                <div class="step">
+                    <div class="step-num">4</div>
+                    <h3>See the heatmap</h3>
+                    <p>Results appear in a color-coded matrix. Green means fast, red means slow. Instantly see which links are the bottleneck.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="features">
+            <h2>Features</h2>
+            <div class="feature-grid">
+                <div class="feature">
+                    <h3>Single binary</h3>
+                    <p>One file, zero dependencies. No runtime, no installer. Works on Windows, macOS, and Linux.</p>
+                </div>
+                <div class="feature">
+                    <h3>Full mesh testing</h3>
+                    <p>Tests every pair of machines on your network using round-robin scheduling so tests don't interfere with each other.</p>
+                </div>
+                <div class="feature">
+                    <h3>Active Directory integration</h3>
+                    <p>Discovers machines via LDAP and deploys agents over SMB. No manual setup on each computer.</p>
+                </div>
+                <div class="feature">
+                    <h3>Real-time dashboard</h3>
+                    <p>Web-based UI with live agent status, a speed heatmap, and an activity log. Runs in any browser.</p>
+                </div>
+                <div class="feature">
+                    <h3>Internet speed testing</h3>
+                    <p>Each agent tests its own upload and download to the internet so you can compare LAN vs. WAN performance.</p>
+                </div>
+                <div class="feature">
+                    <h3>No port forwarding</h3>
+                    <p>Agents connect outbound to the coordinator. Works through NAT and firewalls on your LAN out of the box.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="download" class="download">
+            <h2>Download</h2>
+            <p class="download-intro">Grab the right binary for the machine you'll run the coordinator on. Agents are deployed automatically.</p>
+            <div class="download-grid">
+                <a href="https://github.com/gdcolella/neteval/releases/latest/download/neteval-windows-amd64.exe" class="download-card">
+                    <div class="os-icon">
+                        <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M3 5.548l7.065-0.966v6.822H3V5.548zm0 12.904l7.065 0.966v-6.822H3v5.856zm7.876 1.075L22 21v-7.596H10.876v5.123zm0-14.054v6.822H22V3l-11.124 1.473z"/></svg>
+                    </div>
+                    <h3>Windows</h3>
+                    <span class="arch">x86_64</span>
+                    <span class="filename">neteval-windows-amd64.exe</span>
+                </a>
+                <a href="https://github.com/gdcolella/neteval/releases/latest/download/neteval-linux-amd64" class="download-card">
+                    <div class="os-icon">
+                        <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.368 1.884 1.564.777.2 1.606-.001 2.207-.467.263.019.527.003.794-.045.321-.055.603-.183.85-.39 1.082-.328 1.451-.879 1.537-1.344.088-.479-.086-.898-.19-1.278-.055-.2-.099-.399-.06-.603.036-.199.182-.336.318-.465.238-.227.431-.449.404-.749-.014-.15-.086-.308-.12-.381-.073-.15-.135-.293-.099-.436.046-.165.145-.293.196-.422a1.1 1.1 0 00.049-.587l-.003-.01c-.08-.249-.218-.364-.346-.475a.91.91 0 01-.132-.123c-.155-.209-.267-.444-.296-.777-.022-.23.044-.401.118-.571.058-.13.114-.266.095-.455-.022-.27-.149-.445-.247-.593a1.15 1.15 0 01-.095-.147c-.125-.291-.125-.725-.085-1.128.013-.125.025-.247.025-.378 0-.152-.012-.31-.04-.456-.073-.38-.249-.698-.472-.886a.833.833 0 00-.123-.081l-.003-.003c-.088-.046-.167-.076-.212-.111-.046-.03-.087-.072-.152-.137-.086-.085-.165-.19-.258-.26-.01-.01-.012-.017-.01-.024a3.658 3.658 0 00-.376-.497c-.455-.494-.713-.795-.903-1.382-.19-.586-.24-1.386-.343-2.403-.098-.906-.312-1.567-.702-2.085-.39-.522-.874-.866-1.442-1.103a4.7 4.7 0 00-1.39-.395c-.252-.036-.45-.063-.533-.161a2.04 2.04 0 01-.148-.267 4.29 4.29 0 00-.396-.694 3.736 3.736 0 00-.789-.762A3.755 3.755 0 0012.504 0z"/></svg>
+                    </div>
+                    <h3>Linux</h3>
+                    <span class="arch">x86_64</span>
+                    <span class="filename">neteval-linux-amd64</span>
+                </a>
+                <a href="https://github.com/gdcolella/neteval/releases/latest/download/neteval-darwin-amd64" class="download-card">
+                    <div class="os-icon">
+                        <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                    </div>
+                    <h3>macOS</h3>
+                    <span class="arch">Intel / Apple Silicon</span>
+                    <span class="filename">neteval-darwin-amd64</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="quickstart">
+            <h2>Quick start</h2>
+            <div class="terminal">
+                <div class="terminal-bar">
+                    <span class="terminal-dot red"></span>
+                    <span class="terminal-dot yellow"></span>
+                    <span class="terminal-dot green"></span>
+                </div>
+                <pre><code><span class="comment"># Just run it. That's it.</span>
+<span class="prompt">$</span> ./neteval
+
+<span class="output">2024/01/15 10:30:00 starting NetEval coordinator on port 8080
+2024/01/15 10:30:00 coordinator listening on http://0.0.0.0:8080
+2024/01/15 10:30:00 open your browser to http://localhost:8080</span>
+
+<span class="comment"># Or specify a port</span>
+<span class="prompt">$</span> ./neteval --port 3000</code></pre>
+            </div>
+        </section>
+
+        <footer>
+            <p>NetEval is free and open source.</p>
+        </footer>
+    </div>
+</body>
+</html>

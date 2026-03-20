@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetEval - Network Speed Tester</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>NetEval</h1>
+            <div>
+                <span id="conn-status" class="status-dot disconnected"></span>
+                <span>Coordinator</span>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="btn-mesh" class="primary" disabled>Run Mesh Test</button>
+            <button id="btn-internet" disabled>Run Internet Test</button>
+            <button id="btn-clear">Clear Results</button>
+        </div>
+
+        <div class="panels">
+            <div class="panel">
+                <div class="panel-header">
+                    Agents <span id="agent-count">0</span>
+                </div>
+                <div class="panel-body">
+                    <ul id="agent-list" class="agent-list">
+                        <li class="no-results">No agents connected</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">Speed Matrix</div>
+                <div class="panel-body">
+                    <div id="heatmap-container" class="heatmap-container">
+                        <div class="empty-state">
+                            <h2>No results yet</h2>
+                            <p>Connect agents and run a mesh test to see the speed matrix.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel log-panel">
+            <div class="panel-header">Activity Log</div>
+            <div class="panel-body">
+                <div id="log-entries" class="log-entries"></div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
