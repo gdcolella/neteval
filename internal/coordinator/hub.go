@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"neteval/internal/protocol"
+	"neteval/internal/store"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -37,6 +38,8 @@ type Hub struct {
 	results    []protocol.TestResult
 	resultMu   sync.RWMutex
 	nextID     int
+	Store      *store.Store
+	runID      string
 }
 
 // NewHub creates a new Hub.
@@ -113,11 +116,23 @@ func (h *Hub) RemoveDashboard(conn *websocket.Conn) {
 	delete(h.dashboards, conn)
 }
 
+// SetRunID sets the current run identifier for result persistence.
+func (h *Hub) SetRunID(id string) {
+	h.runID = id
+}
+
 // AddResult stores a test result and broadcasts to dashboards.
 func (h *Hub) AddResult(result protocol.TestResult) {
 	h.resultMu.Lock()
 	h.results = append(h.results, result)
 	h.resultMu.Unlock()
+
+	// Persist to SQLite if available
+	if h.Store != nil && h.runID != "" {
+		if err := h.Store.SaveResult(h.runID, result); err != nil {
+			log.Printf("store: failed to save result: %v", err)
+		}
+	}
 
 	h.broadcastToDashboards(protocol.Envelope{
 		Type:    protocol.MsgTestResult,

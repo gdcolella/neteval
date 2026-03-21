@@ -19,20 +19,34 @@ type Computer struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// Credentials holds domain authentication info.
+// Credentials holds authentication info for a machine.
+// In a domain environment, Domain is set (e.g. "CORP") and used as a prefix.
+// In a workgroup, Domain is empty and credentials are local to each machine.
 type Credentials struct {
 	Domain   string `json:"domain"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// DiscoverComputers finds Windows computers on the Active Directory domain.
-// Uses LDAP via PowerShell on Windows, or net lookup-based discovery elsewhere.
-func DiscoverComputers(creds Credentials) ([]Computer, error) {
-	if runtime.GOOS == "windows" {
-		return discoverViaAD(creds)
+// UserString returns the credential string for tools (DOMAIN\user or just user).
+func (c Credentials) UserString() string {
+	if c.Domain != "" {
+		return c.Domain + `\` + c.Username
 	}
-	return discoverViaNetScan(creds)
+	return c.Username
+}
+
+// DiscoverComputers finds computers on the network.
+// If creds.Domain is set, uses AD/LDAP. Otherwise falls back to subnet scan.
+func DiscoverComputers(creds Credentials) ([]Computer, error) {
+	if creds.Domain != "" {
+		if runtime.GOOS == "windows" {
+			return discoverViaAD(creds)
+		}
+		return discoverViaNetScan(creds)
+	}
+	// Workgroup mode: just scan the subnet
+	return discoverViaSubnetScan()
 }
 
 // discoverViaAD uses PowerShell + AD cmdlets to find computers.

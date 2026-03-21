@@ -12,6 +12,7 @@ import (
 	"neteval/internal/ad"
 	"neteval/internal/config"
 	"neteval/internal/protocol"
+	"neteval/internal/store"
 	"neteval/web"
 
 	"nhooyr.io/websocket"
@@ -26,6 +27,7 @@ type Coordinator struct {
 	TLSCert          string
 	TLSKey           string
 	AuthToken        string
+	Store            *store.Store
 	discovered       []ad.Computer
 	discoveredMu     sync.RWMutex
 }
@@ -63,6 +65,8 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/deploy/machines", c.handleGetMachines)
 	mux.HandleFunc("/api/deploy/start", c.handleDeploy)
 	mux.HandleFunc("/api/results/export", c.handleExportResults)
+	mux.HandleFunc("/api/history/runs", c.handleGetRuns)
+	mux.HandleFunc("/api/history/run", c.handleGetRunDetail)
 
 	// Wrap with auth middleware if token is set
 	var handler http.Handler = mux
@@ -275,13 +279,45 @@ func (c *Coordinator) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Supports two modes:
+	// 1. Shared credentials: {"credentials": {...}, "hostnames": [...]}
+	// 2. Per-machine credentials: {"machines": [{"hostname": "...", "credentials": {...}}, ...]}
 	var req struct {
-		Credentials ad.Credentials `json:"credentials"`
-		Hostnames   []string       `json:"hostnames"`
+		Credentials *ad.Credentials  `json:"credentials,omitempty"`
+		Hostnames   []string         `json:"hostnames,omitempty"`
+		Machines    []struct {
+			Hostname    string         `json:"hostname"`
+			Credentials ad.Credentials `json:"credentials"`
+		} `json:"machines,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	// Normalize into a list of hostname -> credentials
+	type deployTarget struct {
+		Hostname string
+		Creds    ad.Credentials
+	}
+	var deployList []deployTarget
+
+	if len(req.Machines) > 0 {
+		// Per-machine credentials (workgroup mode)
+		for _, m := range req.Machines {
+			deployList = append(deployList, deployTarget{
+				Hostname: m.Hostname,
+				Creds:    m.Credentials,
+			})
+		}
+	} else if req.Credentials != nil {
+		// Shared credentials (domain mode)
+		for _, h := range req.Hostnames {
+			deployList = append(deployList, deployTarget{
+				Hostname: h,
+				Creds:    *req.Credentials,
+			})
+		}
 	}
 
 	coordinatorAddr := fmt.Sprintf("%s:%d", getLocalIP(), c.Port)
@@ -294,8 +330,8 @@ func (c *Coordinator) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 		c.discoveredMu.RUnlock()
 
-		for _, hostname := range req.Hostnames {
-			target, ok := targets[hostname]
+		for _, dt := range deployList {
+			target, ok := targets[dt.Hostname]
 			if !ok {
 				continue
 			}
@@ -303,25 +339,25 @@ func (c *Coordinator) handleDeploy(w http.ResponseWriter, r *http.Request) {
 			c.Hub.broadcastToDashboards(protocol.Envelope{
 				Type: protocol.MsgDeployStatus,
 				Payload: protocol.DeployStatusPayload{
-					Hostname: hostname,
+					Hostname: dt.Hostname,
 					IP:       target.IP,
 					Status:   "deploying",
 				},
 			})
 
-			err := ad.DeployAgent(target, req.Credentials, coordinatorAddr)
+			err := ad.DeployAgent(target, dt.Creds, coordinatorAddr)
 			status := "started"
 			errMsg := ""
 			if err != nil {
 				status = "error"
 				errMsg = err.Error()
-				log.Printf("deploy to %s failed: %v", hostname, err)
+				log.Printf("deploy to %s failed: %v", dt.Hostname, err)
 			}
 
 			c.Hub.broadcastToDashboards(protocol.Envelope{
 				Type: protocol.MsgDeployStatus,
 				Payload: protocol.DeployStatusPayload{
-					Hostname: hostname,
+					Hostname: dt.Hostname,
 					IP:       target.IP,
 					Status:   status,
 					Error:    errMsg,
@@ -354,6 +390,39 @@ func (c *Coordinator) handleExportResults(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Disposition", "attachment; filename=neteval-results.json")
 		json.NewEncoder(w).Encode(results)
 	}
+}
+
+func (c *Coordinator) handleGetRuns(w http.ResponseWriter, r *http.Request) {
+	if c.Store == nil {
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+	runs, err := c.Store.GetRuns()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(runs)
+}
+
+func (c *Coordinator) handleGetRunDetail(w http.ResponseWriter, r *http.Request) {
+	runID := r.URL.Query().Get("id")
+	if runID == "" {
+		http.Error(w, "missing ?id param", http.StatusBadRequest)
+		return
+	}
+	if c.Store == nil {
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+	results, err := c.Store.GetRunResults(runID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 
 func getLocalIP() string {

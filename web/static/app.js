@@ -241,10 +241,21 @@
     }
 
     // --- Deploy modal ---
+    function getDeployMode() {
+        return document.getElementById('deploy-mode').value;
+    }
+
+    function updateDeployModeUI() {
+        const mode = getDeployMode();
+        document.getElementById('domain-fields').style.display = mode === 'domain' ? 'block' : 'none';
+        document.getElementById('shared-cred-fields').style.display = mode === 'domain' ? 'block' : 'none';
+    }
+
     function openDeployModal() {
         document.getElementById('deploy-modal').style.display = 'flex';
         document.getElementById('deploy-step-1').style.display = 'block';
         document.getElementById('deploy-step-2').style.display = 'none';
+        updateDeployModeUI();
     }
 
     function closeDeployModal() {
@@ -252,23 +263,28 @@
     }
 
     function discoverMachines() {
+        const mode = getDeployMode();
         const domain = document.getElementById('ad-domain').value;
         const username = document.getElementById('ad-username').value;
         const password = document.getElementById('ad-password').value;
 
-        if (!domain || !username || !password) {
-            alert('Please fill in all fields');
+        if (mode === 'domain' && (!domain || !username || !password)) {
+            alert('Please fill in domain, username, and password');
             return;
         }
 
         const btn = document.getElementById('btn-discover');
         btn.disabled = true;
-        btn.textContent = 'Discovering...';
+        btn.textContent = 'Scanning...';
+
+        const body = mode === 'domain'
+            ? { domain, username, password }
+            : { domain: '', username: '', password: '' };
 
         fetch('/api/deploy/discover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain, username, password })
+            body: JSON.stringify(body)
         })
         .then(r => {
             if (!r.ok) return r.text().then(t => { throw new Error(t); });
@@ -279,59 +295,103 @@
             renderMachineList();
             document.getElementById('deploy-step-1').style.display = 'none';
             document.getElementById('deploy-step-2').style.display = 'block';
-            log('Discovered ' + machines.length + ' machines');
+            log('Found ' + machines.length + ' machines on the network');
         })
         .catch(err => {
-            log('Discovery error: ' + err.message);
-            alert('Discovery failed: ' + err.message);
+            log('Scan error: ' + err.message);
+            alert('Scan failed: ' + err.message);
         })
         .finally(() => {
             btn.disabled = false;
-            btn.textContent = 'Discover Machines';
+            btn.textContent = 'Scan Network';
         });
     }
 
     function renderMachineList() {
         const list = document.getElementById('machine-list');
+        const mode = getDeployMode();
         document.getElementById('machine-count').textContent = discoveredMachines.length + ' machines found';
 
-        list.innerHTML = discoveredMachines.map((m, i) => `
-            <div class="machine-item">
-                <input type="checkbox" class="machine-check" data-index="${i}" checked>
-                <span class="machine-hostname">${esc(m.hostname)}</span>
-                <span class="machine-ip">${esc(m.ip)}</span>
-                <span class="machine-status ${m.status}">${esc(m.status)}</span>
-            </div>
-        `).join('');
+        if (mode === 'workgroup') {
+            // Each machine gets its own username/password fields
+            list.innerHTML = discoveredMachines.map((m, i) => `
+                <div class="machine-item machine-item-workgroup">
+                    <div class="machine-item-row">
+                        <input type="checkbox" class="machine-check" data-index="${i}" checked>
+                        <span class="machine-hostname">${esc(m.hostname)}</span>
+                        <span class="machine-ip">${esc(m.ip)}</span>
+                        <span class="machine-status ${m.status}">${esc(m.status)}</span>
+                    </div>
+                    <div class="machine-creds">
+                        <input type="text" class="machine-user" data-index="${i}" placeholder="username" value="Administrator">
+                        <input type="password" class="machine-pass" data-index="${i}" placeholder="password">
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            list.innerHTML = discoveredMachines.map((m, i) => `
+                <div class="machine-item">
+                    <input type="checkbox" class="machine-check" data-index="${i}" checked>
+                    <span class="machine-hostname">${esc(m.hostname)}</span>
+                    <span class="machine-ip">${esc(m.ip)}</span>
+                    <span class="machine-status ${m.status}">${esc(m.status)}</span>
+                </div>
+            `).join('');
+        }
     }
 
     function deploySelected() {
+        const mode = getDeployMode();
         const checks = document.querySelectorAll('.machine-check:checked');
-        const hostnames = [];
-        checks.forEach(c => {
-            const idx = parseInt(c.dataset.index);
-            hostnames.push(discoveredMachines[idx].hostname);
-        });
 
-        if (hostnames.length === 0) {
+        if (checks.length === 0) {
             alert('No machines selected');
             return;
         }
 
-        const domain = document.getElementById('ad-domain').value;
-        const username = document.getElementById('ad-username').value;
-        const password = document.getElementById('ad-password').value;
+        let body;
+
+        if (mode === 'workgroup') {
+            // Per-machine credentials
+            const machines = [];
+            checks.forEach(c => {
+                const idx = c.dataset.index;
+                const hostname = discoveredMachines[parseInt(idx)].hostname;
+                const user = document.querySelector(`.machine-user[data-index="${idx}"]`).value;
+                const pass = document.querySelector(`.machine-pass[data-index="${idx}"]`).value;
+                if (!user || !pass) return;
+                machines.push({
+                    hostname: hostname,
+                    credentials: { domain: '', username: user, password: pass }
+                });
+            });
+            if (machines.length === 0) {
+                alert('Please enter username and password for each selected machine');
+                return;
+            }
+            body = { machines };
+        } else {
+            // Shared domain credentials
+            const domain = document.getElementById('ad-domain').value;
+            const username = document.getElementById('ad-username').value;
+            const password = document.getElementById('ad-password').value;
+            const hostnames = [];
+            checks.forEach(c => {
+                hostnames.push(discoveredMachines[parseInt(c.dataset.index)].hostname);
+            });
+            body = {
+                credentials: { domain, username, password },
+                hostnames: hostnames
+            };
+        }
 
         fetch('/api/deploy/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                credentials: { domain, username, password },
-                hostnames: hostnames
-            })
+            body: JSON.stringify(body)
         })
         .then(r => r.json())
-        .then(d => log('Deployment started for ' + hostnames.length + ' machines'))
+        .then(d => log('Deployment started'))
         .catch(err => log('Deploy error: ' + err.message));
     }
 
@@ -425,7 +485,40 @@
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
         document.getElementById('mesh-container').style.display = tab === 'mesh' ? '' : 'none';
         document.getElementById('internet-container').style.display = tab === 'internet' ? '' : 'none';
-        renderResults();
+        document.getElementById('history-container').style.display = tab === 'history' ? '' : 'none';
+        if (tab === 'history') loadHistory();
+        else renderResults();
+    }
+
+    function loadHistory() {
+        const container = document.getElementById('history-container');
+        fetch('/api/history/runs')
+            .then(r => r.json())
+            .then(runs => {
+                if (!runs || runs.length === 0) {
+                    container.innerHTML = '<div class="no-results">No saved test runs yet</div>';
+                    return;
+                }
+                let html = '<table class="internet-table"><thead><tr><th>Run</th><th>Type</th><th>Results</th><th>Avg Speed</th><th>Max</th><th>Time</th></tr></thead><tbody>';
+                runs.forEach(run => {
+                    const avg = formatSpeed(run.avg_bps);
+                    const max = formatSpeed(run.max_bps);
+                    const time = new Date(run.started_at).toLocaleString();
+                    html += `<tr>
+                        <td><code>${esc(run.run_id)}</code></td>
+                        <td>${esc(run.test_type)}</td>
+                        <td>${run.result_count}</td>
+                        <td>${avg}</td>
+                        <td>${max}</td>
+                        <td>${time}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                container.innerHTML = '<div class="no-results">Failed to load history: ' + esc(e.message) + '</div>';
+            });
     }
 
     function log(msg) {
@@ -457,6 +550,7 @@
         document.getElementById('btn-deploy-selected').addEventListener('click', deploySelected);
         document.getElementById('btn-export-csv').addEventListener('click', () => exportResults('csv'));
         document.getElementById('btn-export-json').addEventListener('click', () => exportResults('json'));
+        document.getElementById('deploy-mode').addEventListener('change', updateDeployModeUI);
 
         document.getElementById('select-all').addEventListener('change', (e) => {
             document.querySelectorAll('.machine-check').forEach(c => c.checked = e.target.checked);
@@ -473,5 +567,19 @@
 
         updateButtons();
         connect();
+
+        // Auto-refresh agent list every 10s
+        setInterval(() => {
+            fetch('/api/agents')
+                .then(r => r.json())
+                .then(data => {
+                    if (JSON.stringify(data) !== JSON.stringify(agents)) {
+                        agents = data;
+                        renderAgents();
+                        renderResults();
+                    }
+                })
+                .catch(() => {}); // silent on network errors
+        }, 10000);
     });
 })();

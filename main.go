@@ -15,6 +15,7 @@ import (
 	"neteval/internal/agent"
 	"neteval/internal/config"
 	"neteval/internal/coordinator"
+	"neteval/internal/store"
 )
 
 func main() {
@@ -52,6 +53,18 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 	c.TLSCert = tlsCert
 	c.TLSKey = tlsKey
 	c.AuthToken = authToken
+
+	// Open SQLite store for result persistence
+	db, err := store.New("neteval.db")
+	if err != nil {
+		log.Printf("warning: could not open result store: %v (results won't persist)", err)
+	} else {
+		c.Store = db
+		c.Hub.Store = db
+		defer db.Close()
+		log.Printf("result store opened (neteval.db)")
+	}
+
 	log.Printf("starting NetEval coordinator on port %d", port)
 
 	// Start a local agent that connects back to this coordinator

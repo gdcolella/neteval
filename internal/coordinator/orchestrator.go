@@ -53,7 +53,9 @@ func (o *Orchestrator) RunMeshTest(ctx context.Context) error {
 		return fmt.Errorf("need at least 2 agents, have %d", n)
 	}
 
-	log.Printf("starting mesh test with %d agents", n)
+	runID := fmt.Sprintf("mesh-%d", time.Now().Unix())
+	o.hub.SetRunID(runID)
+	log.Printf("starting mesh test with %d agents (run: %s)", n, runID)
 
 	// Generate round-robin tournament rounds
 	rounds := generateRounds(agents)
@@ -147,7 +149,9 @@ func (o *Orchestrator) RunInternetTest(ctx context.Context) error {
 	}()
 
 	agents := o.hub.GetAgents()
-	log.Printf("starting internet test with %d agents", len(agents))
+	runID := fmt.Sprintf("internet-%d", time.Now().Unix())
+	o.hub.SetRunID(runID)
+	log.Printf("starting internet test with %d agents (run: %s)", len(agents), runID)
 
 	var wg sync.WaitGroup
 	for _, info := range agents {
