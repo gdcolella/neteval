@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -21,21 +22,21 @@ type InternetResult struct {
 func RunInternetTest(ctx context.Context) (*InternetResult, error) {
 	result := &InternetResult{}
 
-	// Measure latency
+	// Measure latency (average of 3 pings)
 	latency, err := measureLatency(ctx)
 	if err == nil {
 		result.LatencyMs = float64(latency.Milliseconds())
 	}
 
-	// Download test: fetch a 25MB payload from Cloudflare
-	dlBps, err := measureDownload(ctx)
+	// Download test: 4 parallel streams, 25MB each = 100MB total
+	dlBps, err := measureDownloadParallel(ctx, 4, 25*1024*1024)
 	if err != nil {
 		return nil, fmt.Errorf("download test: %w", err)
 	}
 	result.DownloadBps = dlBps
 
-	// Upload test: POST random data to Cloudflare
-	ulBps, err := measureUpload(ctx)
+	// Upload test: 4 parallel streams, 10MB each = 40MB total
+	ulBps, err := measureUploadParallel(ctx, 4, 10*1024*1024)
 	if err != nil {
 		return nil, fmt.Errorf("upload test: %w", err)
 	}
@@ -45,62 +46,120 @@ func RunInternetTest(ctx context.Context) (*InternetResult, error) {
 }
 
 func measureLatency(ctx context.Context) (time.Duration, error) {
-	start := time.Now()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://speed.cloudflare.com/__down?bytes=0", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
+	var total time.Duration
+	var count int
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://speed.cloudflare.com/__down?bytes=0", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		total += time.Since(start)
+		count++
 	}
-	resp.Body.Close()
-	return time.Since(start), nil
+	if count == 0 {
+		return 0, fmt.Errorf("all pings failed")
+	}
+	return total / time.Duration(count), nil
 }
 
-func measureDownload(ctx context.Context) (float64, error) {
-	// Download 25MB
-	const size = 25 * 1024 * 1024
-	url := fmt.Sprintf("https://speed.cloudflare.com/__down?bytes=%d", size)
+func measureDownloadParallel(ctx context.Context, streams int, bytesPerStream int) (float64, error) {
+	url := fmt.Sprintf("https://speed.cloudflare.com/__down?bytes=%d", bytesPerStream)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var mu sync.Mutex
+	var totalBytes int64
+	var wg sync.WaitGroup
+	var firstErr error
+
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
 
-	n, _ := io.Copy(io.Discard, resp.Body)
+	for i := 0; i < streams; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			defer resp.Body.Close()
+			n, _ := io.Copy(io.Discard, resp.Body)
+			mu.Lock()
+			totalBytes += n
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
 	elapsed := time.Since(start)
 
-	if n == 0 {
+	if totalBytes == 0 {
+		if firstErr != nil {
+			return 0, firstErr
+		}
 		return 0, fmt.Errorf("no data received")
 	}
 
-	return float64(n*8) / elapsed.Seconds(), nil
+	return float64(totalBytes*8) / elapsed.Seconds(), nil
 }
 
-func measureUpload(ctx context.Context) (float64, error) {
-	// Upload 10MB
-	const size = 10 * 1024 * 1024
-
-	data := make([]byte, size)
-	rand.Read(data)
-
-	pr, pw := io.Pipe()
-	go func() {
-		pw.Write(data)
-		pw.Close()
-	}()
-
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://speed.cloudflare.com/__up", pr)
-	req.ContentLength = size
+func measureUploadParallel(ctx context.Context, streams int, bytesPerStream int) (float64, error) {
+	var mu sync.Mutex
+	var totalBytes int64
+	var wg sync.WaitGroup
+	var firstErr error
 
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
+
+	for i := 0; i < streams; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data := make([]byte, bytesPerStream)
+			rand.Read(data)
+
+			pr, pw := io.Pipe()
+			go func() {
+				pw.Write(data)
+				pw.Close()
+			}()
+
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://speed.cloudflare.com/__up", pr)
+			req.ContentLength = int64(bytesPerStream)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			resp.Body.Close()
+
+			mu.Lock()
+			totalBytes += int64(bytesPerStream)
+			mu.Unlock()
+		}()
 	}
-	resp.Body.Close()
+
+	wg.Wait()
 	elapsed := time.Since(start)
 
-	return float64(size*8) / elapsed.Seconds(), nil
+	if totalBytes == 0 {
+		if firstErr != nil {
+			return 0, firstErr
+		}
+		return 0, fmt.Errorf("no data sent")
+	}
+
+	return float64(totalBytes*8) / elapsed.Seconds(), nil
 }
