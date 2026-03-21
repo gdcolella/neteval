@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -305,35 +306,43 @@ func (a *Agent) handleSelfUpdate() {
 		return
 	}
 
-	tmpPath := exePath + ".update"
-	f, err := os.Create(tmpPath)
+	dir := filepath.Dir(exePath)
+	base := filepath.Base(exePath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	timestamp := time.Now().Format("20060102-150405")
+	newName := fmt.Sprintf("%s-%s%s", name, timestamp, ext)
+	newPath := filepath.Join(dir, newName)
+
+	f, err := os.Create(newPath)
 	if err != nil {
-		log.Printf("self-update: can't create temp file: %v", err)
+		log.Printf("self-update: can't create file %s: %v", newPath, err)
 		return
 	}
 
 	_, err = io.Copy(f, resp.Body)
 	f.Close()
 	if err != nil {
-		os.Remove(tmpPath)
+		os.Remove(newPath)
 		log.Printf("self-update: download error: %v", err)
 		return
 	}
 
-	os.Chmod(tmpPath, 0755)
+	os.Chmod(newPath, 0755)
 
-	if err := os.Rename(tmpPath, exePath); err != nil {
-		log.Printf("self-update: replace failed: %v", err)
-		os.Remove(tmpPath)
-		return
+	// Try in-place replace (works on Linux/macOS, may fail on Windows)
+	if err := os.Rename(newPath, exePath); err == nil {
+		log.Println("self-update: replaced in-place, restarting...")
+		cmd := exec.Command(exePath, os.Args[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Start()
+		os.Exit(0)
 	}
 
-	log.Println("self-update complete, restarting...")
-	cmd := exec.Command(exePath, os.Args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Start()
-	os.Exit(0)
+	// Fallback: keep the new file and tell the user
+	log.Printf("self-update: new version downloaded to: %s", newPath)
+	log.Printf("self-update: stop this agent, replace %s with the new file, and restart", base)
 }
 
 func getOutboundIP() string {
