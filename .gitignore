@@ -2,3 +2,6 @@ neteval
 neteval.exe
 neteval-*
 *.exe
+*.db
+*.db-shm
+*.db-wal
