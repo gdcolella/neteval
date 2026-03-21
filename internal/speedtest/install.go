@@ -16,7 +16,7 @@ import (
 
 const (
 	// Well-known iperf3 download URLs
-	iperf3WinURL = "https://github.com/ar51an/iperf3-win-builds/releases/download/3.17.1/iperf3.17.1-win64.zip"
+	iperf3WinURL = "https://github.com/ar51an/iperf3-win-builds/releases/download/3.20/iperf-3.20-win64.zip"
 )
 
 // EnsureIperf3 makes sure iperf3 is available, installing it if needed.
