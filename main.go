@@ -15,12 +15,14 @@ import (
 	"neteval/internal/agent"
 	"neteval/internal/config"
 	"neteval/internal/coordinator"
+	"neteval/internal/discover"
 	"neteval/internal/store"
 )
 
 func main() {
 	coordMode := flag.Bool("coordinator", false, "Run as coordinator (default if no flags)")
 	agentMode := flag.Bool("agent", false, "Run as agent")
+	followMode := flag.Bool("follow", false, "Auto-discover coordinator on the LAN and connect as agent")
 	coordAddr := flag.String("coordinator-addr", "", "Coordinator address for agent mode (e.g. 192.168.1.10:8080)")
 	port := flag.Int("port", config.DefaultPort, "Listen port for coordinator")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file")
@@ -30,7 +32,7 @@ func main() {
 	flag.Parse()
 
 	// Default to coordinator mode if no flags specified
-	if !*coordMode && !*agentMode {
+	if !*coordMode && !*agentMode && !*followMode {
 		*coordMode = true
 	}
 
@@ -39,6 +41,8 @@ func main() {
 
 	if *coordMode {
 		runCoordinator(ctx, *port, *tlsCert, *tlsKey, *authToken, *noBrowser)
+	} else if *followMode {
+		runFollower(ctx, *authToken)
 	} else if *agentMode {
 		if *coordAddr == "" {
 			fmt.Fprintln(os.Stderr, "error: --coordinator-addr is required in agent mode")
@@ -67,6 +71,9 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 
 	c.LoadTargets()
 	log.Printf("starting NetEval coordinator on port %d", port)
+
+	// Broadcast presence so followers can find us
+	go discover.BroadcastPresence(ctx, port)
 
 	// Start a local agent that connects back to this coordinator
 	go func() {
@@ -104,6 +111,17 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 	if err := c.Run(ctx); err != nil {
 		log.Fatalf("coordinator: %v", err)
 	}
+}
+
+func runFollower(ctx context.Context, authToken string) {
+	log.Println("searching for NetEval coordinator on the network...")
+
+	coordAddr, err := discover.ListenForCoordinator(ctx)
+	if err != nil {
+		log.Fatalf("could not find coordinator: %v", err)
+	}
+
+	runAgent(ctx, coordAddr, authToken)
 }
 
 func runAgent(ctx context.Context, coordAddr, authToken string) {
