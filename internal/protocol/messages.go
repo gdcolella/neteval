@@ -14,6 +14,7 @@ const (
 	MsgDeployStatus     = "deploy_status"
 	MsgDashboardUpdate  = "dashboard_update"
 	MsgTestsComplete    = "tests_complete"
+	MsgUpdateAgent      = "update_agent"
 )
 
 // Envelope wraps all WebSocket messages.
@@ -47,6 +48,14 @@ type RunMeshTestPayload struct {
 
 // RunInternetTestPayload tells an agent to test internet speed.
 type RunInternetTestPayload struct{}
+
+// TestSettings configurable from the dashboard.
+type TestSettings struct {
+	DurationSec    int `json:"duration_sec"`     // per-direction test duration (default 10)
+	MaxParallel    int `json:"max_parallel"`     // max simultaneous link tests per round (0 = all)
+	BufSizeKB      int `json:"buf_size_kb"`      // TCP buffer size in KB (default 128)
+	Bidirectional  bool `json:"bidirectional"`   // test both directions (default true)
+}
 
 // TestResult is reported by agents after completing a test.
 type TestResult struct {

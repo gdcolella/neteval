@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 
 	"neteval/internal/ad"
@@ -49,6 +50,9 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	// Serve embedded web UI
 	mux.Handle("/", http.FileServer(http.FS(web.StaticFS)))
 
+	// Self-update: serve the coordinator's own binary
+	mux.HandleFunc("/api/binary", c.handleServeBinary)
+
 	// WebSocket endpoints
 	mux.HandleFunc("/ws/agent", c.handleAgentWS)
 	mux.HandleFunc("/ws/dashboard", c.handleDashboardWS)
@@ -58,6 +62,8 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/tests/mesh", c.handleRunMeshTest)
 	mux.HandleFunc("/api/tests/internet", c.handleRunInternetTest)
 	mux.HandleFunc("/api/tests/pair", c.handleRunPairTest)
+	mux.HandleFunc("/api/settings", c.handleSettings)
+	mux.HandleFunc("/api/agents/update", c.handleUpdateAgents)
 	mux.HandleFunc("/api/results", c.handleGetResults)
 	mux.HandleFunc("/api/results/clear", c.handleClearResults)
 
@@ -250,6 +256,67 @@ func (c *Coordinator) handleRunPairTest(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (c *Coordinator) handleUpdateAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	agents := c.Hub.GetAgents()
+	count := 0
+	for _, info := range agents {
+		ac := c.Hub.GetAgent(info.ID)
+		if ac == nil {
+			continue
+		}
+		ac.Send(r.Context(), protocol.Envelope{Type: protocol.MsgUpdateAgent})
+		count++
+	}
+
+	log.Printf("sent update command to %d agents", count)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "updating", "count": count})
+}
+
+func (c *Coordinator) handleServeBinary(w http.ResponseWriter, r *http.Request) {
+	exePath, err := os.Executable()
+	if err != nil {
+		http.Error(w, "cannot find executable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=neteval")
+	http.ServeFile(w, r, exePath)
+}
+
+func (c *Coordinator) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(c.Orchestrator.Settings)
+		return
+	}
+	if r.Method == http.MethodPost {
+		var s protocol.TestSettings
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if s.DurationSec <= 0 {
+			s.DurationSec = 10
+		}
+		if s.BufSizeKB <= 0 {
+			s.BufSizeKB = 128
+		}
+		c.Orchestrator.Settings = s
+		log.Printf("test settings updated: duration=%ds, maxParallel=%d, bufSize=%dKB, bidirectional=%v",
+			s.DurationSec, s.MaxParallel, s.BufSizeKB, s.Bidirectional)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(s)
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
 func (c *Coordinator) handleGetResults(w http.ResponseWriter, r *http.Request) {

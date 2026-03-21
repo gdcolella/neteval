@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"neteval/internal/config"
@@ -135,10 +139,74 @@ func (a *Agent) handleMessage(ctx context.Context, env protocol.Envelope) {
 		a.handleMeshTest(ctx, env.Payload)
 	case protocol.MsgRunInternetTest:
 		a.handleInternetTest(ctx)
+	case protocol.MsgUpdateAgent:
+		a.handleSelfUpdate()
 	case protocol.MsgHeartbeat:
-		// respond with heartbeat
 		wsjson.Write(ctx, a.conn, protocol.Envelope{Type: protocol.MsgHeartbeat})
 	}
+}
+
+func (a *Agent) handleSelfUpdate() {
+	log.Println("self-update requested, downloading new binary...")
+
+	coordBase := a.CoordinatorURL
+	// Convert ws:// to http://
+	httpURL := strings.Replace(coordBase, "ws://", "http://", 1)
+	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
+	binaryURL := httpURL + "/api/binary"
+
+	resp, err := http.Get(binaryURL)
+	if err != nil {
+		log.Printf("self-update: download failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		log.Printf("self-update: server returned %d", resp.StatusCode)
+		return
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Printf("self-update: can't find self: %v", err)
+		return
+	}
+
+	// Write to a temp file next to the current binary
+	tmpPath := exePath + ".update"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		log.Printf("self-update: can't create temp file: %v", err)
+		return
+	}
+
+	_, err = io.Copy(f, resp.Body)
+	f.Close()
+	if err != nil {
+		os.Remove(tmpPath)
+		log.Printf("self-update: download error: %v", err)
+		return
+	}
+
+	// Make executable
+	os.Chmod(tmpPath, 0755)
+
+	// Replace self
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		log.Printf("self-update: replace failed: %v", err)
+		os.Remove(tmpPath)
+		return
+	}
+
+	log.Println("self-update complete, restarting...")
+
+	// Re-exec self with same args
+	cmd := exec.Command(exePath, os.Args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Start()
+	os.Exit(0)
 }
 
 func (a *Agent) handleMeshTest(ctx context.Context, payload interface{}) {

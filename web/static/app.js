@@ -7,6 +7,7 @@
     let testRunning = false;
     let activeTab = 'mesh';
     let discoveredMachines = [];
+    let useBytes = false; // false = bits/s, true = bytes/s
 
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -505,6 +506,13 @@
 
     // --- Formatting helpers ---
     function formatSpeed(bps) {
+        if (useBytes) {
+            const Bps = bps / 8;
+            if (Bps >= 1e9) return (Bps / 1e9).toFixed(2) + ' GB/s';
+            if (Bps >= 1e6) return (Bps / 1e6).toFixed(1) + ' MB/s';
+            if (Bps >= 1e3) return (Bps / 1e3).toFixed(0) + ' KB/s';
+            return Bps.toFixed(0) + ' B/s';
+        }
         if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gbps';
         if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps';
         if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' Kbps';
@@ -568,6 +576,45 @@
 
     function exportResults(format) {
         window.open('/api/results/export?format=' + format, '_blank');
+    }
+
+    // --- Settings ---
+    function openSettingsModal() {
+        fetch('/api/settings').then(r => r.json()).then(s => {
+            document.getElementById('set-duration').value = s.duration_sec || 10;
+            document.getElementById('set-max-parallel').value = s.max_parallel || 0;
+            document.getElementById('set-buf-size').value = s.buf_size_kb || 128;
+            document.getElementById('set-bidirectional').checked = s.bidirectional !== false;
+            document.getElementById('settings-modal').style.display = 'flex';
+        });
+    }
+
+    function saveSettings() {
+        const settings = {
+            duration_sec: parseInt(document.getElementById('set-duration').value) || 10,
+            max_parallel: parseInt(document.getElementById('set-max-parallel').value) || 0,
+            buf_size_kb: parseInt(document.getElementById('set-buf-size').value) || 128,
+            bidirectional: document.getElementById('set-bidirectional').checked
+        };
+        fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        })
+        .then(r => r.json())
+        .then(() => {
+            document.getElementById('settings-modal').style.display = 'none';
+            log('Settings saved: ' + settings.duration_sec + 's, parallel=' + settings.max_parallel +
+                ', buf=' + settings.buf_size_kb + 'KB, bidir=' + settings.bidirectional);
+        });
+    }
+
+    function updateAllAgents() {
+        if (!confirm('This will update all connected agents to the coordinator\\'s version and restart them. Continue?')) return;
+        fetch('/api/agents/update', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => log('Update sent to ' + d.count + ' agents'))
+            .catch(e => log('Update error: ' + e.message));
     }
 
     function switchTab(tab) {
@@ -650,6 +697,25 @@
         document.getElementById('btn-export-csv').addEventListener('click', () => exportResults('csv'));
         document.getElementById('btn-export-json').addEventListener('click', () => exportResults('json'));
         document.getElementById('deploy-mode').addEventListener('change', updateDeployModeUI);
+
+        // Settings
+        document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+        document.getElementById('settings-close').addEventListener('click', () => {
+            document.getElementById('settings-modal').style.display = 'none';
+        });
+        document.getElementById('btn-save-settings').addEventListener('click', saveSettings);
+        document.getElementById('settings-modal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) e.target.style.display = 'none';
+        });
+
+        // Update agents
+        document.getElementById('btn-update-agents').addEventListener('click', updateAllAgents);
+
+        // Unit toggle
+        document.getElementById('unit-bytes').addEventListener('change', (e) => {
+            useBytes = e.target.checked;
+            renderResults();
+        });
 
         document.getElementById('select-all').addEventListener('change', (e) => {
             document.querySelectorAll('.machine-check').forEach(c => c.checked = e.target.checked);

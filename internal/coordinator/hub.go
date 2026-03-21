@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -94,6 +95,9 @@ func (h *Hub) GetAgents() []protocol.AgentInfo {
 	for _, ac := range h.agents {
 		agents = append(agents, ac.Info)
 	}
+	sort.Slice(agents, func(i, j int) bool {
+		return agents[i].Hostname < agents[j].Hostname
+	})
 	return agents
 }
 

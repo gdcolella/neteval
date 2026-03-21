@@ -20,9 +20,12 @@
             <button id="btn-mesh" class="primary" disabled>Run Mesh Test</button>
             <button id="btn-internet" disabled>Run Internet Test</button>
             <button id="btn-deploy" class="secondary">Deploy Agents</button>
+            <button id="btn-settings">Settings</button>
+            <button id="btn-update-agents">Update Agents</button>
             <button id="btn-export-csv">Export CSV</button>
             <button id="btn-export-json">Export JSON</button>
             <button id="btn-clear">Clear Results</button>
+            <label class="unit-toggle"><input type="checkbox" id="unit-bytes"> Show GB/s</label>
         </div>
 
         <div id="progress-bar" class="progress-bar" style="display:none">
@@ -78,6 +81,34 @@
             <div class="panel-header">Activity Log</div>
             <div class="panel-body">
                 <div id="log-entries" class="log-entries"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display:none">
+        <div class="modal-content" style="width:400px">
+            <div class="modal-header">
+                <h2>Test Settings</h2>
+                <button class="modal-close" id="settings-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Test duration per direction (seconds)</label>
+                    <input type="number" id="set-duration" min="1" max="120" value="10">
+                </div>
+                <div class="form-group">
+                    <label>Max simultaneous link tests (0 = unlimited)</label>
+                    <input type="number" id="set-max-parallel" min="0" max="50" value="0">
+                </div>
+                <div class="form-group">
+                    <label>TCP buffer size (KB)</label>
+                    <input type="number" id="set-buf-size" min="1" max="4096" value="128">
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="set-bidirectional" checked> Test both directions</label>
+                </div>
+                <button id="btn-save-settings" class="primary">Save</button>
             </div>
         </div>
     </div>

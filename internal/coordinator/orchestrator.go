@@ -7,20 +7,44 @@ import (
 	"sync"
 	"time"
 
-	"neteval/internal/config"
 	"neteval/internal/protocol"
 )
 
 // Orchestrator schedules and runs mesh speed tests.
 type Orchestrator struct {
-	hub *Hub
-	mu  sync.Mutex
-	running bool
+	hub      *Hub
+	mu       sync.Mutex
+	running  bool
+	Settings protocol.TestSettings
 }
 
 // NewOrchestrator creates a new Orchestrator.
 func NewOrchestrator(hub *Hub) *Orchestrator {
-	return &Orchestrator{hub: hub}
+	return &Orchestrator{
+		hub: hub,
+		Settings: protocol.TestSettings{
+			DurationSec:   10,
+			MaxParallel:   0,
+			BufSizeKB:     128,
+			Bidirectional: true,
+		},
+	}
+}
+
+func (o *Orchestrator) durationMs() int64 {
+	d := o.Settings.DurationSec
+	if d <= 0 {
+		d = 10
+	}
+	return int64(d) * 1000
+}
+
+func (o *Orchestrator) testDuration() time.Duration {
+	d := o.Settings.DurationSec
+	if d <= 0 {
+		d = 10
+	}
+	return time.Duration(d) * time.Second
 }
 
 // IsRunning returns whether a test is currently in progress.
@@ -60,15 +84,27 @@ func (o *Orchestrator) RunMeshTest(ctx context.Context) error {
 	// Generate round-robin tournament rounds
 	rounds := generateRounds(agents)
 
+	maxPar := o.Settings.MaxParallel
 	for roundNum, pairs := range rounds {
-		log.Printf("mesh test round %d/%d: %d pairs", roundNum+1, len(rounds), len(pairs))
+		log.Printf("mesh test round %d/%d: %d pairs (max parallel: %d)", roundNum+1, len(rounds), len(pairs), maxPar)
 
-		// Run all pairs in this round concurrently
+		// Limit concurrency if MaxParallel is set
+		var sem chan struct{}
+		if maxPar > 0 {
+			sem = make(chan struct{}, maxPar)
+		}
+
 		var wg sync.WaitGroup
 		for _, pair := range pairs {
 			wg.Add(1)
+			if sem != nil {
+				sem <- struct{}{}
+			}
 			go func(a, b protocol.AgentInfo) {
 				defer wg.Done()
+				if sem != nil {
+					defer func() { <-sem }()
+				}
 				o.testPair(ctx, a, b)
 			}(pair[0], pair[1])
 		}
@@ -86,7 +122,7 @@ func (o *Orchestrator) RunMeshTest(ctx context.Context) error {
 
 // testPair runs upload and download tests between two agents.
 func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
-	duration := config.DefaultTestDuration.Milliseconds()
+	duration := o.durationMs()
 
 	agentA := o.hub.GetAgent(a.ID)
 	if agentA == nil {
@@ -108,7 +144,11 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 
 	o.waitForResult(ctx, a.ID, b.ID, "upload")
 
-	// Download: A -> B
+	if !o.Settings.Bidirectional {
+		return
+	}
+
+	// Download: A -> B (i.e. B sends to A)
 	log.Printf("testing %s -> %s (download)", a.Hostname, b.Hostname)
 	agentA.Send(ctx, protocol.Envelope{
 		Type: protocol.MsgRunMeshTest,
@@ -126,7 +166,7 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 
 // waitForResult waits for a specific test result or times out.
 func (o *Orchestrator) waitForResult(ctx context.Context, sourceID, targetID, direction string) {
-	timeout := config.DefaultTestDuration + 30*time.Second
+	timeout := o.testDuration() + 30*time.Second
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 

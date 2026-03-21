@@ -64,6 +64,16 @@ button.primary:hover { background: #2ea043; }
 button.secondary { background: #1f3a5f; border-color: #2d5a8e; }
 button.secondary:hover { background: #2d5a8e; }
 
+.unit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #8b949e;
+    cursor: pointer;
+    padding: 0 8px;
+}
+
 /* Progress bar */
 .progress-bar {
     margin-bottom: 20px;
