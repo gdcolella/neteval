@@ -40,6 +40,7 @@ type Hub struct {
 	nextID     int
 	Store      *store.Store
 	runID      string
+	resultCh   chan protocol.TestResult // notifies orchestrator of incoming results
 }
 
 // NewHub creates a new Hub.
@@ -47,6 +48,7 @@ func NewHub() *Hub {
 	return &Hub{
 		agents:     make(map[string]*AgentConn),
 		dashboards: make(map[*websocket.Conn]bool),
+		resultCh:   make(chan protocol.TestResult, 100),
 	}
 }
 
@@ -132,6 +134,12 @@ func (h *Hub) AddResult(result protocol.TestResult) {
 		if err := h.Store.SaveResult(h.runID, result); err != nil {
 			log.Printf("store: failed to save result: %v", err)
 		}
+	}
+
+	// Notify orchestrator (non-blocking)
+	select {
+	case h.resultCh <- result:
+	default:
 	}
 
 	h.broadcastToDashboards(protocol.Envelope{
@@ -233,6 +241,11 @@ func (h *Hub) HandleAgentWS(ctx context.Context, conn *websocket.Conn) {
 			h.broadcastToDashboards(msg)
 		}
 	}
+}
+
+// ResultCh returns the channel that receives test results.
+func (h *Hub) ResultCh() <-chan protocol.TestResult {
+	return h.resultCh
 }
 
 // BroadcastTestsComplete notifies dashboards that all tests are done.

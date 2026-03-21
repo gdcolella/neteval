@@ -88,12 +88,12 @@ func (o *Orchestrator) RunMeshTest(ctx context.Context) error {
 func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 	duration := config.DefaultTestDuration.Milliseconds()
 
-	// A uploads to B (A connects to B's speed server)
 	agentA := o.hub.GetAgent(a.ID)
 	if agentA == nil {
 		return
 	}
 
+	// Upload: A -> B
 	log.Printf("testing %s -> %s (upload)", a.Hostname, b.Hostname)
 	agentA.Send(ctx, protocol.Envelope{
 		Type: protocol.MsgRunMeshTest,
@@ -106,14 +106,9 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 		},
 	})
 
-	// Wait for the test to complete plus some buffer
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(config.DefaultTestDuration + 5*time.Second):
-	}
+	o.waitForResult(ctx, a.ID, b.ID, "upload")
 
-	// A downloads from B
+	// Download: A -> B
 	log.Printf("testing %s -> %s (download)", a.Hostname, b.Hostname)
 	agentA.Send(ctx, protocol.Envelope{
 		Type: protocol.MsgRunMeshTest,
@@ -126,10 +121,28 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 		},
 	})
 
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(config.DefaultTestDuration + 5*time.Second):
+	o.waitForResult(ctx, a.ID, b.ID, "download")
+}
+
+// waitForResult waits for a specific test result or times out.
+func (o *Orchestrator) waitForResult(ctx context.Context, sourceID, targetID, direction string) {
+	timeout := config.DefaultTestDuration + 30*time.Second
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			log.Printf("timeout waiting for result %s -> %s (%s)", sourceID, targetID, direction)
+			return
+		case r := <-o.hub.ResultCh():
+			if r.SourceID == sourceID && r.TargetID == targetID && r.Direction == direction {
+				return
+			}
+			// Not our result — it was already stored by AddResult, just keep waiting
+		}
 	}
 }
 
@@ -176,6 +189,37 @@ func (o *Orchestrator) RunInternetTest(ctx context.Context) error {
 		return ctx.Err()
 	case <-time.After(30 * time.Second):
 	}
+
+	o.hub.BroadcastTestsComplete()
+	return nil
+}
+
+// RunPairTest tests a single link between two agents (both directions).
+func (o *Orchestrator) RunPairTest(ctx context.Context, sourceID, targetID string) error {
+	o.mu.Lock()
+	if o.running {
+		o.mu.Unlock()
+		return fmt.Errorf("test already running")
+	}
+	o.running = true
+	o.mu.Unlock()
+	defer func() {
+		o.mu.Lock()
+		o.running = false
+		o.mu.Unlock()
+	}()
+
+	srcConn := o.hub.GetAgent(sourceID)
+	dstConn := o.hub.GetAgent(targetID)
+	if srcConn == nil || dstConn == nil {
+		return fmt.Errorf("one or both agents not connected")
+	}
+
+	runID := fmt.Sprintf("pair-%d", time.Now().Unix())
+	o.hub.SetRunID(runID)
+	log.Printf("retesting link %s <-> %s (run: %s)", srcConn.Info.Hostname, dstConn.Info.Hostname, runID)
+
+	o.testPair(ctx, srcConn.Info, dstConn.Info)
 
 	o.hub.BroadcastTestsComplete()
 	return nil

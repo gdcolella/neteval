@@ -115,7 +115,25 @@
             matrix[r.source_id][r.target_id][r.direction] = r;
         });
 
-        let html = '<table class="heatmap"><thead><tr><th></th>';
+        // Rows = From, Columns = To, Cell = throughput sending from row to column
+        // "upload" result from A targeting B = A sending to B
+        // "download" result from A targeting B = B sending to A
+        // Normalize into a simple from->to lookup
+        const fromTo = {};
+        meshResults.forEach(r => {
+            let from, to;
+            if (r.direction === 'upload') {
+                from = r.source_id;
+                to = r.target_id;
+            } else {
+                from = r.target_id;
+                to = r.source_id;
+            }
+            if (!fromTo[from]) fromTo[from] = {};
+            fromTo[from][to] = r;
+        });
+
+        let html = '<table class="heatmap"><thead><tr><th>From \\ To</th>';
         agents.forEach(a => { html += `<th>${esc(a.hostname)}</th>`; });
         html += '</tr></thead><tbody>';
 
@@ -127,36 +145,64 @@
                     return;
                 }
 
-                const data = matrix[src.id] && matrix[src.id][dst.id];
-                if (!data) {
-                    html += '<td class="result">&hellip;</td>';
+                const r = fromTo[src.id] && fromTo[src.id][dst.id];
+                if (!r) {
+                    html += `<td class="result retestable" data-src="${src.id}" data-dst="${dst.id}">&hellip;</td>`;
                     return;
                 }
 
-                const ul = data.upload;
-                const dl = data.download;
-                let text = '';
-                let cls = '';
-
-                if (ul && !ul.error) {
-                    text += '&uarr;' + formatSpeed(ul.bits_per_sec);
-                    cls = speedClass(ul.bits_per_sec);
+                if (r.error) {
+                    html += `<td class="result speed-error retestable" data-src="${src.id}" data-dst="${dst.id}">Error</td>`;
+                    return;
                 }
-                if (dl && !dl.error) {
-                    if (text) text += ' ';
-                    text += '&darr;' + formatSpeed(dl.bits_per_sec);
-                    if (!cls) cls = speedClass(dl.bits_per_sec);
-                }
-                if ((ul && ul.error) || (dl && dl.error)) { text = text || 'Error'; cls = cls || 'speed-error'; }
-                if (!text) { text = '&hellip;'; cls = ''; }
 
-                html += `<td class="result ${cls}" title="${esc(buildTooltip(src, dst, data))}">${text}</td>`;
+                const speed = formatSpeed(r.bits_per_sec);
+                const cls = speedClass(r.bits_per_sec);
+                const tip = src.hostname + ' \u2192 ' + dst.hostname + ': ' + speed;
+
+                html += `<td class="result ${cls} retestable" data-src="${src.id}" data-dst="${dst.id}" title="${esc(tip)}">${speed}</td>`;
             });
             html += '</tr>';
         });
 
         html += '</tbody></table>';
         container.innerHTML = html;
+
+        // Attach click handlers for retesting individual links
+        container.querySelectorAll('.retestable').forEach(td => {
+            td.addEventListener('click', () => {
+                if (testRunning) return;
+                const srcId = td.dataset.src;
+                const dstId = td.dataset.dst;
+                retestLink(srcId, dstId);
+            });
+        });
+    }
+
+    function retestLink(sourceId, targetId) {
+        testRunning = true;
+        updateButtons();
+
+        const srcName = (agents.find(a => a.id === sourceId) || {}).hostname || sourceId;
+        const dstName = (agents.find(a => a.id === targetId) || {}).hostname || targetId;
+        showProgress('Retesting ' + srcName + ' \u2194 ' + dstName + '...');
+        log('Retesting link: ' + srcName + ' \u2194 ' + dstName);
+
+        fetch('/api/tests/pair', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: sourceId, target_id: targetId })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t); });
+            return r.json();
+        })
+        .catch(e => {
+            log('Error: ' + e.message);
+            testRunning = false;
+            updateButtons();
+            hideProgress();
+        });
     }
 
     function renderInternetResults() {
@@ -210,12 +256,6 @@
         container.innerHTML = html;
     }
 
-    function buildTooltip(src, dst, data) {
-        let tip = src.hostname + ' -> ' + dst.hostname + '\n';
-        if (data.upload && !data.upload.error) tip += 'Upload: ' + formatSpeed(data.upload.bits_per_sec) + '\n';
-        if (data.download && !data.download.error) tip += 'Download: ' + formatSpeed(data.download.bits_per_sec) + '\n';
-        return tip;
-    }
 
     // --- Progress ---
     function showProgress(text) {

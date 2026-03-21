@@ -57,6 +57,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/agents", c.handleGetAgents)
 	mux.HandleFunc("/api/tests/mesh", c.handleRunMeshTest)
 	mux.HandleFunc("/api/tests/internet", c.handleRunInternetTest)
+	mux.HandleFunc("/api/tests/pair", c.handleRunPairTest)
 	mux.HandleFunc("/api/results", c.handleGetResults)
 	mux.HandleFunc("/api/results/clear", c.handleClearResults)
 
@@ -214,6 +215,36 @@ func (c *Coordinator) handleRunInternetTest(w http.ResponseWriter, r *http.Reque
 	go func() {
 		if err := c.Orchestrator.RunInternetTest(context.Background()); err != nil {
 			log.Printf("internet test error: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (c *Coordinator) handleRunPairTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if c.Orchestrator.IsRunning() {
+		http.Error(w, "test already running", http.StatusConflict)
+		return
+	}
+
+	var req struct {
+		SourceID string `json:"source_id"`
+		TargetID string `json:"target_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	go func() {
+		if err := c.Orchestrator.RunPairTest(context.Background(), req.SourceID, req.TargetID); err != nil {
+			log.Printf("pair test error: %v", err)
 		}
 	}()
 

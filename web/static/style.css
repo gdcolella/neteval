@@ -192,6 +192,16 @@ button.secondary:hover { background: #2d5a8e; }
     min-width: 80px;
 }
 
+.heatmap td.retestable {
+    cursor: pointer;
+    transition: outline 0.15s;
+}
+
+.heatmap td.retestable:hover {
+    outline: 2px solid #58a6ff;
+    outline-offset: -2px;
+}
+
 .heatmap td.self { background: #1c2128; color: #484f58; }
 
 /* Speed color scale */

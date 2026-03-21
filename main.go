@@ -20,35 +20,48 @@ import (
 )
 
 func main() {
-	coordMode := flag.Bool("coordinator", false, "Run as coordinator (default if no flags)")
-	agentMode := flag.Bool("agent", false, "Run as agent")
-	followMode := flag.Bool("follow", false, "Auto-discover coordinator on the LAN and connect as agent")
-	coordAddr := flag.String("coordinator-addr", "", "Coordinator address for agent mode (e.g. 192.168.1.10:8080)")
 	port := flag.Int("port", config.DefaultPort, "Listen port for coordinator")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file")
 	tlsKey := flag.String("tls-key", "", "Path to TLS key file")
 	authToken := flag.String("auth-token", "", "Shared auth token for API/agent access")
 	noBrowser := flag.Bool("no-browser", false, "Don't auto-open browser on startup")
+	// Hidden flags for manual override (backward compat)
+	forceCoord := flag.Bool("coordinator", false, "Force coordinator mode")
+	forceAgent := flag.Bool("agent", false, "Force agent mode")
+	coordAddr := flag.String("coordinator-addr", "", "Coordinator address (agent mode)")
 	flag.Parse()
-
-	// Default to coordinator mode if no flags specified
-	if !*coordMode && !*agentMode && !*followMode {
-		*coordMode = true
-	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if *coordMode {
-		runCoordinator(ctx, *port, *tlsCert, *tlsKey, *authToken, *noBrowser)
-	} else if *followMode {
-		runFollower(ctx, *authToken)
-	} else if *agentMode {
+	if *forceAgent {
 		if *coordAddr == "" {
-			fmt.Fprintln(os.Stderr, "error: --coordinator-addr is required in agent mode")
+			fmt.Fprintln(os.Stderr, "error: --coordinator-addr is required with --agent")
 			os.Exit(1)
 		}
 		runAgent(ctx, *coordAddr, *authToken)
+		return
+	}
+
+	if *forceCoord {
+		runCoordinator(ctx, *port, *tlsCert, *tlsKey, *authToken, *noBrowser)
+		return
+	}
+
+	// Auto-detect: look for an existing coordinator on the LAN.
+	// If found, join as an agent. Otherwise, become the coordinator.
+	log.Println("looking for an existing NetEval coordinator on the network...")
+
+	searchCtx, searchCancel := context.WithTimeout(ctx, 4*time.Second)
+	defer searchCancel()
+
+	found, err := discover.ListenForCoordinator(searchCtx)
+	if err == nil && found != "" {
+		log.Printf("found coordinator at %s — joining as agent", found)
+		runAgent(ctx, found, *authToken)
+	} else {
+		log.Println("no coordinator found — starting as coordinator")
+		runCoordinator(ctx, *port, *tlsCert, *tlsKey, *authToken, *noBrowser)
 	}
 }
 
@@ -58,7 +71,6 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 	c.TLSKey = tlsKey
 	c.AuthToken = authToken
 
-	// Open SQLite store for result persistence
 	db, err := store.New("neteval.db")
 	if err != nil {
 		log.Printf("warning: could not open result store: %v (results won't persist)", err)
@@ -72,10 +84,10 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 	c.LoadTargets()
 	log.Printf("starting NetEval coordinator on port %d", port)
 
-	// Broadcast presence so followers can find us
+	// Broadcast presence so other instances auto-join
 	go discover.BroadcastPresence(ctx, port)
 
-	// Start a local agent that connects back to this coordinator
+	// Start a local agent
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		scheme := "ws"
@@ -95,7 +107,6 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 		a.Run(ctx)
 	}()
 
-	// Auto-open browser
 	if !noBrowser {
 		go func() {
 			time.Sleep(800 * time.Millisecond)
@@ -103,25 +114,13 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 			if tlsCert != "" {
 				scheme = "https"
 			}
-			url := fmt.Sprintf("%s://localhost:%d", scheme, port)
-			openBrowser(url)
+			openBrowser(fmt.Sprintf("%s://localhost:%d", scheme, port))
 		}()
 	}
 
 	if err := c.Run(ctx); err != nil {
 		log.Fatalf("coordinator: %v", err)
 	}
-}
-
-func runFollower(ctx context.Context, authToken string) {
-	log.Println("searching for NetEval coordinator on the network...")
-
-	coordAddr, err := discover.ListenForCoordinator(ctx)
-	if err != nil {
-		log.Fatalf("could not find coordinator: %v", err)
-	}
-
-	runAgent(ctx, coordAddr, authToken)
 }
 
 func runAgent(ctx context.Context, coordAddr, authToken string) {
