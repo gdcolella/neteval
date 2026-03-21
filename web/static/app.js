@@ -610,7 +610,7 @@
     }
 
     function updateAllAgents() {
-        if (!confirm('This will update all connected agents to the coordinator\\'s version and restart them. Continue?')) return;
+        if (!confirm('This will update all connected agents to the coordinator version and restart them. Continue?')) return;
         fetch('/api/agents/update', { method: 'POST' })
             .then(r => r.json())
             .then(d => log('Update sent to ' + d.count + ' agents'))
