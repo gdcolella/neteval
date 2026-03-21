@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -141,6 +144,20 @@ func RunIperfClient(targetIP string, targetPort int, durationSec int, direction 
 
 // HasIperf3 checks if iperf3 is available on this system.
 func HasIperf3() bool {
-	_, err := exec.LookPath("iperf3")
-	return err == nil
+	if _, err := exec.LookPath("iperf3"); err == nil {
+		return true
+	}
+	// Also check next to our own executable (Windows download case)
+	if exePath, err := os.Executable(); err == nil {
+		local := filepath.Join(filepath.Dir(exePath), "iperf3")
+		if runtime.GOOS == "windows" {
+			local += ".exe"
+		}
+		if _, err := os.Stat(local); err == nil {
+			// Add to PATH so exec.Command finds it
+			os.Setenv("PATH", filepath.Dir(exePath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+			return true
+		}
+	}
+	return false
 }

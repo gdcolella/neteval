@@ -47,7 +47,7 @@ func New(coordinatorURL string) (*Agent, error) {
 	}
 
 	// Ensure iperf3 is available (install if missing)
-	if err := speedtest.EnsureIperf3(); err != nil {
+	if err := speedtest.EnsureIperf3(coordinatorURL); err != nil {
 		log.Printf("WARNING: %v — falling back to built-in TCP test", err)
 		a.useIperf = false
 	}
