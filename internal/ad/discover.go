@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -149,17 +150,45 @@ func parseLdapOutput(output string) []Computer {
 	return computers
 }
 
-// discoverViaSubnetScan does a basic ARP-based discovery of the local subnet.
+// LookupIPs takes a list of manually entered IPs/hostnames and returns Computer entries.
+func LookupIPs(ips []string) []Computer {
+	var computers []Computer
+	for _, entry := range ips {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		ip := entry
+		hostname := entry
+		// If it looks like an IP, do a reverse lookup
+		if net.ParseIP(entry) != nil {
+			hostname = reverseLookup(entry)
+		} else {
+			// It's a hostname, resolve it
+			ip = resolveHost(entry)
+		}
+		computers = append(computers, Computer{
+			Hostname: hostname,
+			IP:       ip,
+			Status:   "discovered",
+		})
+	}
+	return computers
+}
+
+// discoverViaSubnetScan scans the local subnet concurrently for hosts with SMB open.
 func discoverViaSubnetScan() ([]Computer, error) {
-	// Get local interfaces and scan each subnet
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
 	}
 
+	var mu sync.Mutex
 	var computers []Computer
 	seen := make(map[string]bool)
 
+	// Collect all IPs to scan
+	var ipsToScan []string
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -171,7 +200,6 @@ func discoverViaSubnetScan() ([]Computer, error) {
 				continue
 			}
 
-			// Scan common host range in subnet
 			base := ipNet.IP.To4()
 			ones, bits := ipNet.Mask.Size()
 			if ones == 0 || bits == 0 || ones < 16 {
@@ -180,7 +208,7 @@ func discoverViaSubnetScan() ([]Computer, error) {
 
 			hostBits := uint(bits - ones)
 			if hostBits > 8 {
-				hostBits = 8 // limit to /24
+				hostBits = 8
 			}
 			maxHosts := (1 << hostBits) - 1
 
@@ -191,19 +219,35 @@ func discoverViaSubnetScan() ([]Computer, error) {
 					continue
 				}
 				seen[ipStr] = true
-
-				// Quick TCP connect check on common Windows ports
-				if isHostAlive(ipStr) {
-					hostname := reverseLookup(ipStr)
-					computers = append(computers, Computer{
-						Hostname: hostname,
-						IP:       ipStr,
-						Status:   "discovered",
-					})
-				}
+				ipsToScan = append(ipsToScan, ipStr)
 			}
 		}
 	}
+
+	// Scan concurrently with a worker pool (50 at a time)
+	sem := make(chan struct{}, 50)
+	var wg sync.WaitGroup
+
+	for _, ipStr := range ipsToScan {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(ip string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if isHostAlive(ip) {
+				hostname := reverseLookup(ip)
+				mu.Lock()
+				computers = append(computers, Computer{
+					Hostname: hostname,
+					IP:       ip,
+					Status:   "discovered",
+				})
+				mu.Unlock()
+			}
+		}(ipStr)
+	}
+	wg.Wait()
 
 	return computers, nil
 }

@@ -324,7 +324,19 @@ button.secondary:hover { background: #2d5a8e; }
     font-size: 14px;
 }
 
-.form-group input:focus, .form-group select:focus {
+.form-group textarea {
+    width: 100%;
+    padding: 8px 12px;
+    background: #0d1117;
+    border: 1px solid #3d444d;
+    border-radius: 6px;
+    color: #e1e4e8;
+    font-size: 13px;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    resize: vertical;
+}
+
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
     outline: none;
     border-color: #58a6ff;
 }
@@ -332,6 +344,11 @@ button.secondary:hover { background: #2d5a8e; }
 .form-group select option {
     background: #0d1117;
     color: #e1e4e8;
+}
+
+.discover-buttons {
+    display: flex;
+    gap: 10px;
 }
 
 /* Machine list in deploy modal */

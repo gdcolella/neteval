@@ -62,6 +62,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 
 	// AD deployment
 	mux.HandleFunc("/api/deploy/discover", c.handleDiscover)
+	mux.HandleFunc("/api/deploy/manual", c.handleManualAdd)
 	mux.HandleFunc("/api/deploy/machines", c.handleGetMachines)
 	mux.HandleFunc("/api/deploy/start", c.handleDeploy)
 	mux.HandleFunc("/api/results/export", c.handleExportResults)
@@ -260,6 +261,30 @@ func (c *Coordinator) handleDiscover(w http.ResponseWriter, r *http.Request) {
 
 	c.discoveredMu.Lock()
 	c.discovered = computers
+	c.discoveredMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(computers)
+}
+
+func (c *Coordinator) handleManualAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IPs []string `json:"ips"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	computers := ad.LookupIPs(req.IPs)
+
+	c.discoveredMu.Lock()
+	c.discovered = append(c.discovered, computers...)
 	c.discoveredMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")

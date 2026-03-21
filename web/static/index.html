@@ -114,7 +114,14 @@
                             <input type="password" id="ad-password">
                         </div>
                     </div>
-                    <button id="btn-discover" class="primary">Scan Network</button>
+                    <div class="form-group">
+                        <label>Or enter IPs/hostnames manually (one per line)</label>
+                        <textarea id="manual-ips" rows="3" placeholder="192.168.1.10&#10;192.168.1.20&#10;fileserver"></textarea>
+                    </div>
+                    <div class="discover-buttons">
+                        <button id="btn-discover" class="primary">Scan Network</button>
+                        <button id="btn-manual-add" class="secondary">Add Manual IPs</button>
+                    </div>
                 </div>
                 <div id="deploy-step-2" style="display:none">
                     <div class="machine-list-header">

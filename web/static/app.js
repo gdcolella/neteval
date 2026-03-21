@@ -307,6 +307,37 @@
         });
     }
 
+    function manualAddIPs() {
+        const text = document.getElementById('manual-ips').value.trim();
+        if (!text) {
+            alert('Enter at least one IP or hostname');
+            return;
+        }
+
+        const ips = text.split('\n').map(s => s.trim()).filter(s => s);
+        const btn = document.getElementById('btn-manual-add');
+        btn.disabled = true;
+
+        fetch('/api/deploy/manual', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips })
+        })
+        .then(r => r.json())
+        .then(machines => {
+            discoveredMachines = discoveredMachines.concat(machines);
+            renderMachineList();
+            document.getElementById('deploy-step-1').style.display = 'none';
+            document.getElementById('deploy-step-2').style.display = 'block';
+            log('Added ' + machines.length + ' machines manually');
+        })
+        .catch(err => {
+            log('Error: ' + err.message);
+            alert('Failed: ' + err.message);
+        })
+        .finally(() => { btn.disabled = false; });
+    }
+
     function renderMachineList() {
         const list = document.getElementById('machine-list');
         const mode = getDeployMode();
@@ -547,6 +578,7 @@
         document.getElementById('btn-deploy').addEventListener('click', openDeployModal);
         document.getElementById('modal-close').addEventListener('click', closeDeployModal);
         document.getElementById('btn-discover').addEventListener('click', discoverMachines);
+        document.getElementById('btn-manual-add').addEventListener('click', manualAddIPs);
         document.getElementById('btn-deploy-selected').addEventListener('click', deploySelected);
         document.getElementById('btn-export-csv').addEventListener('click', () => exportResults('csv'));
         document.getElementById('btn-export-json').addEventListener('click', () => exportResults('json'));
