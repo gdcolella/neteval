@@ -134,8 +134,8 @@
             fromTo[from][to] = r;
         });
 
-        let html = '<table class="heatmap"><thead><tr><th>From \\ To</th>';
-        agents.forEach(a => { html += `<th>${esc(a.hostname)}</th>`; });
+        let html = '<table class="heatmap"><thead><tr><th class="corner-header"><span class="corner-from">FROM ↓</span><span class="corner-to">TO →</span></th>';
+        agents.forEach(a => { html += `<th title="To: ${esc(a.hostname)}">${esc(a.hostname)}</th>`; });
         html += '</tr></thead><tbody>';
 
         agents.forEach(src => {
