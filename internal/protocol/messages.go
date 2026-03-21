@@ -15,6 +15,8 @@ const (
 	MsgDashboardUpdate  = "dashboard_update"
 	MsgTestsComplete    = "tests_complete"
 	MsgUpdateAgent      = "update_agent"
+	MsgPrepareServer    = "prepare_server"
+	MsgServerReady      = "server_ready"
 )
 
 // Envelope wraps all WebSocket messages.

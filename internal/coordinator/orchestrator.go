@@ -125,9 +125,13 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 	duration := o.durationMs()
 
 	agentA := o.hub.GetAgent(a.ID)
-	if agentA == nil {
+	agentB := o.hub.GetAgent(b.ID)
+	if agentA == nil || agentB == nil {
 		return
 	}
+
+	// Tell B to prepare its iperf3 server, wait for ready
+	port := o.prepareTarget(ctx, agentB, b)
 
 	// Upload: A -> B
 	log.Printf("testing %s -> %s (upload)", a.Hostname, b.Hostname)
@@ -136,7 +140,7 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 		Payload: protocol.RunMeshTestPayload{
 			TargetID:   b.ID,
 			TargetIP:   b.IP,
-			TargetPort: b.SpeedPort,
+			TargetPort: port,
 			Direction:  "upload",
 			DurationMs: duration,
 		},
@@ -148,20 +152,44 @@ func (o *Orchestrator) testPair(ctx context.Context, a, b protocol.AgentInfo) {
 		return
 	}
 
-	// Download: A -> B (i.e. B sends to A)
+	// Prepare B's server again for the next test
+	port = o.prepareTarget(ctx, agentB, b)
+
+	// Download: A -> B (i.e. B sends to A via iperf3 -R)
 	log.Printf("testing %s -> %s (download)", a.Hostname, b.Hostname)
 	agentA.Send(ctx, protocol.Envelope{
 		Type: protocol.MsgRunMeshTest,
 		Payload: protocol.RunMeshTestPayload{
 			TargetID:   b.ID,
 			TargetIP:   b.IP,
-			TargetPort: b.SpeedPort,
+			TargetPort: port,
 			Direction:  "download",
 			DurationMs: duration,
 		},
 	})
 
 	o.waitForResult(ctx, a.ID, b.ID, "download")
+}
+
+// prepareTarget tells the target agent to start its speed test server and waits for ready.
+func (o *Orchestrator) prepareTarget(ctx context.Context, ac *AgentConn, info protocol.AgentInfo) int {
+	ac.Send(ctx, protocol.Envelope{Type: protocol.MsgPrepareServer})
+
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return info.SpeedPort
+		case <-timeout:
+			log.Printf("timeout waiting for %s to prepare server, using last known port", info.Hostname)
+			return info.SpeedPort
+		case ready := <-o.hub.ServerReadyCh():
+			if ready.AgentID == ac.Info.ID {
+				return ready.Port
+			}
+			// Not our agent, keep waiting
+		}
+	}
 }
 
 // waitForResult waits for a specific test result or times out.

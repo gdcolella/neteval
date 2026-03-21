@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"neteval/internal/config"
@@ -29,7 +30,9 @@ type Agent struct {
 	Hostname       string
 	SpeedPort      int
 	AuthToken      string
+	useIperf       bool
 	speedListener  net.Listener
+	iperfMu        sync.Mutex // serialize iperf3 server starts
 	conn           *websocket.Conn
 }
 
@@ -40,19 +43,48 @@ func New(coordinatorURL string) (*Agent, error) {
 	a := &Agent{
 		CoordinatorURL: coordinatorURL,
 		Hostname:       hostname,
+		useIperf:       true,
 	}
 
-	// Start TCP speed test server on a random port
-	ln, err := net.Listen("tcp", ":0")
-	if err != nil {
-		return nil, fmt.Errorf("start speed server: %w", err)
+	// Ensure iperf3 is available (install if missing)
+	if err := speedtest.EnsureIperf3(); err != nil {
+		log.Printf("WARNING: %v — falling back to built-in TCP test", err)
+		a.useIperf = false
 	}
-	a.speedListener = ln
-	a.SpeedPort = ln.Addr().(*net.TCPAddr).Port
 
-	go a.acceptSpeedConnections()
+	if a.useIperf {
+		log.Println("using iperf3 for speed tests")
+		srv, err := speedtest.StartIperfServer(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("start iperf3 server: %w", err)
+		}
+		a.SpeedPort = srv.Port
+		go srv.Wait()
+	} else {
+		ln, err := net.Listen("tcp", ":0")
+		if err != nil {
+			return nil, fmt.Errorf("start speed server: %w", err)
+		}
+		a.speedListener = ln
+		a.SpeedPort = ln.Addr().(*net.TCPAddr).Port
+		go a.acceptSpeedConnections()
+	}
 
 	return a, nil
+}
+
+// restartIperfServer starts a fresh iperf3 server (needed after --one-off exits).
+func (a *Agent) restartIperfServer() {
+	a.iperfMu.Lock()
+	defer a.iperfMu.Unlock()
+
+	srv, err := speedtest.StartIperfServer(context.Background())
+	if err != nil {
+		log.Printf("iperf3 server restart failed: %v", err)
+		return
+	}
+	a.SpeedPort = srv.Port
+	go srv.Wait()
 }
 
 func (a *Agent) acceptSpeedConnections() {
@@ -101,10 +133,8 @@ func (a *Agent) connectAndServe(ctx context.Context) error {
 	defer conn.CloseNow()
 	a.conn = conn
 
-	// Increase read limit for large messages
-	conn.SetReadLimit(1 << 20) // 1MB
+	conn.SetReadLimit(1 << 20)
 
-	// Register with coordinator
 	localIP := getOutboundIP()
 	info := protocol.AgentInfo{
 		Hostname:  a.Hostname,
@@ -121,7 +151,6 @@ func (a *Agent) connectAndServe(ctx context.Context) error {
 		return fmt.Errorf("send register: %w", err)
 	}
 
-	// Message loop
 	for {
 		var env protocol.Envelope
 		err := wsjson.Read(ctx, conn, &env)
@@ -139,6 +168,8 @@ func (a *Agent) handleMessage(ctx context.Context, env protocol.Envelope) {
 		a.handleMeshTest(ctx, env.Payload)
 	case protocol.MsgRunInternetTest:
 		a.handleInternetTest(ctx)
+	case protocol.MsgPrepareServer:
+		a.handlePrepareServer(ctx)
 	case protocol.MsgUpdateAgent:
 		a.handleSelfUpdate()
 	case protocol.MsgHeartbeat:
@@ -146,11 +177,112 @@ func (a *Agent) handleMessage(ctx context.Context, env protocol.Envelope) {
 	}
 }
 
+func (a *Agent) handlePrepareServer(ctx context.Context) {
+	if a.useIperf {
+		a.restartIperfServer()
+	}
+	// Report ready with current speed port
+	wsjson.Write(ctx, a.conn, protocol.Envelope{
+		Type:    protocol.MsgServerReady,
+		Payload: map[string]interface{}{"speed_port": a.SpeedPort},
+	})
+}
+
+func (a *Agent) handleMeshTest(ctx context.Context, payload interface{}) {
+	data, _ := json.Marshal(payload)
+	var cmd protocol.RunMeshTestPayload
+	json.Unmarshal(data, &cmd)
+
+	duration := time.Duration(cmd.DurationMs) * time.Millisecond
+	if duration <= 0 {
+		duration = config.DefaultTestDuration
+	}
+
+	tr := protocol.TestResult{
+		SourceID:   a.ID,
+		SourceName: a.Hostname,
+		TargetID:   cmd.TargetID,
+		TestType:   "mesh",
+		Direction:  cmd.Direction,
+		Timestamp:  time.Now(),
+	}
+
+	if a.useIperf {
+		result, err := speedtest.RunIperfClient(
+			cmd.TargetIP, cmd.TargetPort,
+			int(duration.Seconds()), cmd.Direction, 4,
+		)
+		if err != nil {
+			tr.Error = err.Error()
+		} else if result.Error != "" {
+			tr.Error = result.Error
+		} else {
+			tr.BitsPerSec = result.BitsPerSec
+			tr.DurationMs = result.DurationMs
+		}
+
+		// The target's iperf3 --one-off server exited; it needs to restart.
+		// We notify via a separate mechanism (the target agent restarts its own server
+		// when it receives the next test command). For now, we just move on.
+	} else {
+		addr := fmt.Sprintf("%s:%d", cmd.TargetIP, cmd.TargetPort)
+		result, err := speedtest.RunClient(addr, cmd.Direction, duration)
+		if err != nil {
+			tr.Error = err.Error()
+		} else {
+			tr.BitsPerSec = result.BitsPerSec
+			tr.DurationMs = result.DurationMs
+		}
+	}
+
+	wsjson.Write(ctx, a.conn, protocol.Envelope{
+		Type:    protocol.MsgTestResult,
+		Payload: tr,
+	})
+}
+
+func (a *Agent) handleInternetTest(ctx context.Context) {
+	result, err := speedtest.RunInternetTest(ctx)
+
+	dlResult := protocol.TestResult{
+		SourceID:   a.ID,
+		SourceName: a.Hostname,
+		TestType:   "internet",
+		Direction:  "download",
+		Timestamp:  time.Now(),
+	}
+	if err != nil {
+		dlResult.Error = err.Error()
+	} else {
+		dlResult.BitsPerSec = result.DownloadBps
+	}
+	wsjson.Write(ctx, a.conn, protocol.Envelope{
+		Type:    protocol.MsgTestResult,
+		Payload: dlResult,
+	})
+
+	ulResult := protocol.TestResult{
+		SourceID:   a.ID,
+		SourceName: a.Hostname,
+		TestType:   "internet",
+		Direction:  "upload",
+		Timestamp:  time.Now(),
+	}
+	if err != nil {
+		ulResult.Error = err.Error()
+	} else {
+		ulResult.BitsPerSec = result.UploadBps
+	}
+	wsjson.Write(ctx, a.conn, protocol.Envelope{
+		Type:    protocol.MsgTestResult,
+		Payload: ulResult,
+	})
+}
+
 func (a *Agent) handleSelfUpdate() {
 	log.Println("self-update requested, downloading new binary...")
 
 	coordBase := a.CoordinatorURL
-	// Convert ws:// to http://
 	httpURL := strings.Replace(coordBase, "ws://", "http://", 1)
 	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
 	binaryURL := httpURL + "/api/binary"
@@ -173,7 +305,6 @@ func (a *Agent) handleSelfUpdate() {
 		return
 	}
 
-	// Write to a temp file next to the current binary
 	tmpPath := exePath + ".update"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -189,10 +320,8 @@ func (a *Agent) handleSelfUpdate() {
 		return
 	}
 
-	// Make executable
 	os.Chmod(tmpPath, 0755)
 
-	// Replace self
 	if err := os.Rename(tmpPath, exePath); err != nil {
 		log.Printf("self-update: replace failed: %v", err)
 		os.Remove(tmpPath)
@@ -200,88 +329,11 @@ func (a *Agent) handleSelfUpdate() {
 	}
 
 	log.Println("self-update complete, restarting...")
-
-	// Re-exec self with same args
 	cmd := exec.Command(exePath, os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Start()
 	os.Exit(0)
-}
-
-func (a *Agent) handleMeshTest(ctx context.Context, payload interface{}) {
-	data, _ := json.Marshal(payload)
-	var cmd protocol.RunMeshTestPayload
-	json.Unmarshal(data, &cmd)
-
-	addr := fmt.Sprintf("%s:%d", cmd.TargetIP, cmd.TargetPort)
-	duration := time.Duration(cmd.DurationMs) * time.Millisecond
-	if duration <= 0 {
-		duration = config.DefaultTestDuration
-	}
-
-	result, err := speedtest.RunClient(addr, cmd.Direction, duration)
-
-	tr := protocol.TestResult{
-		SourceID:   a.ID,
-		SourceName: a.Hostname,
-		TargetID:   cmd.TargetID,
-		TestType:   "mesh",
-		Direction:  cmd.Direction,
-		Timestamp:  time.Now(),
-	}
-
-	if err != nil {
-		tr.Error = err.Error()
-	} else {
-		tr.BitsPerSec = result.BitsPerSec
-		tr.DurationMs = result.DurationMs
-	}
-
-	wsjson.Write(ctx, a.conn, protocol.Envelope{
-		Type:    protocol.MsgTestResult,
-		Payload: tr,
-	})
-}
-
-func (a *Agent) handleInternetTest(ctx context.Context) {
-	result, err := speedtest.RunInternetTest(ctx)
-
-	// Report download result
-	dlResult := protocol.TestResult{
-		SourceID:   a.ID,
-		SourceName: a.Hostname,
-		TestType:   "internet",
-		Direction:  "download",
-		Timestamp:  time.Now(),
-	}
-	if err != nil {
-		dlResult.Error = err.Error()
-	} else {
-		dlResult.BitsPerSec = result.DownloadBps
-	}
-	wsjson.Write(ctx, a.conn, protocol.Envelope{
-		Type:    protocol.MsgTestResult,
-		Payload: dlResult,
-	})
-
-	// Report upload result
-	ulResult := protocol.TestResult{
-		SourceID:   a.ID,
-		SourceName: a.Hostname,
-		TestType:   "internet",
-		Direction:  "upload",
-		Timestamp:  time.Now(),
-	}
-	if err != nil {
-		ulResult.Error = err.Error()
-	} else {
-		ulResult.BitsPerSec = result.UploadBps
-	}
-	wsjson.Write(ctx, a.conn, protocol.Envelope{
-		Type:    protocol.MsgTestResult,
-		Payload: ulResult,
-	})
 }
 
 func getOutboundIP() string {

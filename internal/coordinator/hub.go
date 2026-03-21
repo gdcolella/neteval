@@ -16,6 +16,11 @@ import (
 	"nhooyr.io/websocket/wsjson"
 )
 
+type serverReadyMsg struct {
+	AgentID string
+	Port    int
+}
+
 // AgentConn tracks a connected agent.
 type AgentConn struct {
 	Info protocol.AgentInfo
@@ -42,14 +47,16 @@ type Hub struct {
 	Store      *store.Store
 	runID      string
 	resultCh   chan protocol.TestResult // notifies orchestrator of incoming results
+	serverReadyCh chan serverReadyMsg
 }
 
 // NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		agents:     make(map[string]*AgentConn),
-		dashboards: make(map[*websocket.Conn]bool),
-		resultCh:   make(chan protocol.TestResult, 100),
+		agents:        make(map[string]*AgentConn),
+		dashboards:    make(map[*websocket.Conn]bool),
+		resultCh:      make(chan protocol.TestResult, 100),
+		serverReadyCh: make(chan serverReadyMsg, 10),
 	}
 }
 
@@ -241,8 +248,18 @@ func (h *Hub) HandleAgentWS(ctx context.Context, conn *websocket.Conn) {
 			h.AddResult(result)
 
 		case protocol.MsgTestProgress:
-			// Forward progress to dashboards
 			h.broadcastToDashboards(msg)
+
+		case protocol.MsgServerReady:
+			data, _ := json.Marshal(msg.Payload)
+			var ready struct {
+				SpeedPort int `json:"speed_port"`
+			}
+			json.Unmarshal(data, &ready)
+			select {
+			case h.serverReadyCh <- serverReadyMsg{AgentID: agentID, Port: ready.SpeedPort}:
+			default:
+			}
 		}
 	}
 }
@@ -250,6 +267,11 @@ func (h *Hub) HandleAgentWS(ctx context.Context, conn *websocket.Conn) {
 // ResultCh returns the channel that receives test results.
 func (h *Hub) ResultCh() <-chan protocol.TestResult {
 	return h.resultCh
+}
+
+// ServerReadyCh returns the channel that receives server ready notifications.
+func (h *Hub) ServerReadyCh() <-chan serverReadyMsg {
+	return h.serverReadyCh
 }
 
 // BroadcastTestsComplete notifies dashboards that all tests are done.
