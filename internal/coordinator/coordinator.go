@@ -65,6 +65,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/deploy/manual", c.handleManualAdd)
 	mux.HandleFunc("/api/deploy/machines", c.handleGetMachines)
 	mux.HandleFunc("/api/deploy/start", c.handleDeploy)
+	mux.HandleFunc("/api/deploy/delete", c.handleDeleteTarget)
 	mux.HandleFunc("/api/results/export", c.handleExportResults)
 	mux.HandleFunc("/api/history/runs", c.handleGetRuns)
 	mux.HandleFunc("/api/history/run", c.handleGetRunDetail)
@@ -260,11 +261,25 @@ func (c *Coordinator) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.discoveredMu.Lock()
-	c.discovered = computers
+	// Merge with existing, dedup by IP
+	seen := make(map[string]bool)
+	for _, m := range c.discovered {
+		seen[m.IP] = true
+	}
+	for _, m := range computers {
+		if !seen[m.IP] {
+			c.discovered = append(c.discovered, m)
+			seen[m.IP] = true
+		}
+	}
 	c.discoveredMu.Unlock()
 
+	c.persistTargets()
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(computers)
+	c.discoveredMu.RLock()
+	json.NewEncoder(w).Encode(c.discovered)
+	c.discoveredMu.RUnlock()
 }
 
 func (c *Coordinator) handleManualAdd(w http.ResponseWriter, r *http.Request) {
@@ -284,8 +299,19 @@ func (c *Coordinator) handleManualAdd(w http.ResponseWriter, r *http.Request) {
 	computers := ad.LookupIPs(req.IPs)
 
 	c.discoveredMu.Lock()
-	c.discovered = append(c.discovered, computers...)
+	seen := make(map[string]bool)
+	for _, m := range c.discovered {
+		seen[m.IP] = true
+	}
+	for _, m := range computers {
+		if !seen[m.IP] {
+			c.discovered = append(c.discovered, m)
+			seen[m.IP] = true
+		}
+	}
 	c.discoveredMu.Unlock()
+
+	c.persistTargets()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(computers)
@@ -448,6 +474,84 @@ func (c *Coordinator) handleGetRunDetail(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
+}
+
+// persistTargets saves current discovered machines to the database.
+func (c *Coordinator) persistTargets() {
+	if c.Store == nil {
+		return
+	}
+	c.discoveredMu.RLock()
+	defer c.discoveredMu.RUnlock()
+
+	var targets []store.Target
+	for _, m := range c.discovered {
+		targets = append(targets, store.Target{
+			Hostname: m.Hostname,
+			IP:       m.IP,
+			OS:       m.OS,
+		})
+	}
+	c.Store.SaveTargets(targets)
+}
+
+// LoadTargets loads persisted targets into memory on startup.
+func (c *Coordinator) LoadTargets() {
+	if c.Store == nil {
+		return
+	}
+	targets, err := c.Store.GetTargets()
+	if err != nil {
+		log.Printf("failed to load targets: %v", err)
+		return
+	}
+	c.discoveredMu.Lock()
+	for _, t := range targets {
+		c.discovered = append(c.discovered, ad.Computer{
+			Hostname: t.Hostname,
+			IP:       t.IP,
+			OS:       t.OS,
+			Status:   "discovered",
+		})
+	}
+	c.discoveredMu.Unlock()
+	if len(targets) > 0 {
+		log.Printf("loaded %d saved deploy targets", len(targets))
+	}
+}
+
+func (c *Coordinator) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	c.discoveredMu.Lock()
+	filtered := c.discovered[:0]
+	for _, m := range c.discovered {
+		if m.Hostname != req.Hostname {
+			filtered = append(filtered, m)
+		}
+	}
+	c.discovered = filtered
+	c.discoveredMu.Unlock()
+
+	// Also remove from DB
+	if c.Store != nil {
+		c.Store.ClearTargets()
+		c.persistTargets()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 func getLocalIP() string {

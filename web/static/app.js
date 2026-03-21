@@ -253,9 +253,28 @@
 
     function openDeployModal() {
         document.getElementById('deploy-modal').style.display = 'flex';
-        document.getElementById('deploy-step-1').style.display = 'block';
-        document.getElementById('deploy-step-2').style.display = 'none';
         updateDeployModeUI();
+
+        // Load saved targets from server
+        fetch('/api/deploy/machines')
+            .then(r => r.json())
+            .then(machines => {
+                if (machines && machines.length > 0) {
+                    // Show saved targets directly
+                    discoveredMachines = machines;
+                    renderMachineList();
+                    document.getElementById('deploy-step-1').style.display = 'none';
+                    document.getElementById('deploy-step-2').style.display = 'block';
+                } else {
+                    // No saved targets, show scan form
+                    document.getElementById('deploy-step-1').style.display = 'block';
+                    document.getElementById('deploy-step-2').style.display = 'none';
+                }
+            })
+            .catch(() => {
+                document.getElementById('deploy-step-1').style.display = 'block';
+                document.getElementById('deploy-step-2').style.display = 'none';
+            });
     }
 
     function closeDeployModal() {
@@ -580,6 +599,14 @@
         document.getElementById('btn-discover').addEventListener('click', discoverMachines);
         document.getElementById('btn-manual-add').addEventListener('click', manualAddIPs);
         document.getElementById('btn-deploy-selected').addEventListener('click', deploySelected);
+        document.getElementById('btn-rescan').addEventListener('click', () => {
+            document.getElementById('deploy-step-1').style.display = 'block';
+            document.getElementById('deploy-step-2').style.display = 'none';
+        });
+        document.getElementById('btn-add-more').addEventListener('click', () => {
+            document.getElementById('deploy-step-1').style.display = 'block';
+            document.getElementById('deploy-step-2').style.display = 'none';
+        });
         document.getElementById('btn-export-csv').addEventListener('click', () => exportResults('csv'));
         document.getElementById('btn-export-json').addEventListener('click', () => exportResults('json'));
         document.getElementById('deploy-mode').addEventListener('change', updateDeployModeUI);

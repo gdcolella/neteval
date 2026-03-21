@@ -65,6 +65,7 @@ func runCoordinator(ctx context.Context, port int, tlsCert, tlsKey, authToken st
 		log.Printf("result store opened (neteval.db)")
 	}
 
+	c.LoadTargets()
 	log.Printf("starting NetEval coordinator on port %d", port)
 
 	// Start a local agent that connects back to this coordinator

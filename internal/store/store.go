@@ -60,6 +60,15 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_results_run ON test_results(run_id);
 		CREATE INDEX IF NOT EXISTS idx_results_type ON test_results(test_type);
 		CREATE INDEX IF NOT EXISTS idx_results_time ON test_results(timestamp);
+
+		CREATE TABLE IF NOT EXISTS targets (
+			id       INTEGER PRIMARY KEY AUTOINCREMENT,
+			hostname TEXT NOT NULL,
+			ip       TEXT NOT NULL DEFAULT '',
+			os       TEXT NOT NULL DEFAULT '',
+			added_at TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(hostname, ip)
+		);
 	`)
 	return err
 }
@@ -244,5 +253,75 @@ func (s *Store) DeleteRun(runID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("DELETE FROM test_results WHERE run_id = ?", runID)
+	return err
+}
+
+// Target represents a persisted deploy target.
+type Target struct {
+	ID       int    `json:"id"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+	OS       string `json:"os,omitempty"`
+}
+
+// SaveTargets persists discovered machines, skipping duplicates.
+func (s *Store) SaveTargets(targets []Target) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO targets (hostname, ip, os) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, t := range targets {
+		stmt.Exec(t.Hostname, t.IP, t.OS)
+	}
+
+	return tx.Commit()
+}
+
+// GetTargets returns all saved deploy targets.
+func (s *Store) GetTargets() ([]Target, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, hostname, ip, os FROM targets ORDER BY hostname`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var targets []Target
+	for rows.Next() {
+		var t Target
+		if err := rows.Scan(&t.ID, &t.Hostname, &t.IP, &t.OS); err != nil {
+			return nil, err
+		}
+		targets = append(targets, t)
+	}
+	return targets, nil
+}
+
+// DeleteTarget removes a saved target by ID.
+func (s *Store) DeleteTarget(id int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM targets WHERE id = ?", id)
+	return err
+}
+
+// ClearTargets removes all saved targets.
+func (s *Store) ClearTargets() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM targets")
 	return err
 }
